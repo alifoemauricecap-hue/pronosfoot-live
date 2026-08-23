@@ -38,6 +38,12 @@ header{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rg
 @keyframes pulser{0%{box-shadow:0 0 0 0 rgba(255,77,94,.6)}70%{box-shadow:0 0 0 8px rgba(255,77,94,0)}100%{box-shadow:0 0 0 0 rgba(255,77,94,0)}}
 .live-pill.off{background:rgba(143,161,184,.1);border-color:var(--line);color:var(--muted)}
 .live-pill.off .dot{background:var(--muted2);animation:none}
+.acc-pill{display:none;align-items:center;gap:5px;padding:5px 11px;border-radius:99px;
+  border:1px solid rgba(255,207,92,.4);background:rgba(255,207,92,.08);color:var(--gold);font-size:11.5px;font-weight:700}
+.chip.gold2{border-color:rgba(255,207,92,.6);background:rgba(255,207,92,.13);color:var(--gold);font-weight:800}
+.day-toggle{display:block;width:100%;margin:10px 0 4px;padding:11px;border-radius:11px;border:1px dashed var(--line);
+  background:var(--card);color:var(--muted);font-size:13px;font-weight:700;cursor:pointer;text-align:center}
+.day-toggle:hover{color:var(--green);border-color:var(--green)}
 .icon-btn{height:36px;min-width:36px;border-radius:10px;border:1px solid var(--line);background:var(--card);
   color:var(--txt);cursor:pointer;font-size:15px;padding:0 9px;transition:.2s;font-weight:700}
 .icon-btn:hover{background:var(--card2);border-color:var(--green)}
@@ -206,6 +212,7 @@ footer{max-width:1280px;margin:0 auto;padding:20px 18px 40px;color:var(--muted2)
       <div class="sub">Pronostics IA · temps réel</div></div>
     </div>
     <div class="spacer"></div>
+    <div class="acc-pill" id="accPill">🎯 IA <b id="accTxt"></b></div>
     <div class="sse" id="ssePill"><span class="dot"></span><span id="sseTxt">CONNEXION…</span></div>
     <div class="live-pill off" id="livePill"><span class="dot"></span><span id="liveTxt">0 en direct</span></div>
     <button class="icon-btn" id="refreshBtn" title="Actualiser">↻</button>
@@ -270,7 +277,7 @@ footer{max-width:1280px;margin:0 auto;padding:20px 18px 40px;color:var(--muted2)
 
 <script>
 // ========================= ÉTAT =========================
-const S = { feed:null, prevScores:{}, filter:'all', q:'', upcoming:false, flashes:new Set(), modalOpen:false, sseOk:false };
+const S = { feed:null, prevScores:{}, filter:'all', q:'', upcoming:false, flashes:new Set(), modalOpen:false, sseOk:false, lastV:-1, openDays:new Set(), feedTs:Date.now() };
 const $ = s => document.querySelector(s);
 const content = $('#content');
 
@@ -288,12 +295,12 @@ function dayLabel(day){
 const fmtHour = utc => new Date(utc).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
 const fmtDate = day => new Date(day+'T12:00:00Z').toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
 function statusBadge(m){
-  if(m.state==='in') return `<span class="badge-live"><span class="dot"></span>${esc(m.clock||m.detail||'LIVE')}</span>`;
+  if(m.state==='in') return `<span class="badge-live" data-clock="${m.clockSec||0}" data-ts="${S.feedTs}"><span class="dot"></span>${esc(m.clock||m.detail||'LIVE')}</span>`;
   if(m.state==='post') return `<span style="color:var(--muted);font-weight:700">${esc(m.detail==='FT'?'Terminé':m.detail)}</span>`;
   return `<span class="hour">🕐 ${fmtHour(m.utc)}</span>`;
 }
 function teamLogo(t){
-  const img = t.logo ? `<img class="tlogo" src="${esc(t.logo)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">` : '<img class="tlogo" style="display:none">';
+  const img = t.logo ? `<img class="tlogo" src="${esc(t.logo)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">` : '<img class="tlogo" style="display:none">';
   return `${img}<span class="tinit">⚽</span>`;
 }
 const formDots = form => !form||!form.length ? '' :
@@ -334,6 +341,7 @@ function predBlock(m, code){
       <span class="chip hl">🎯 <b>${esc(p.topScores[0].s)}</b> (${p.topScores[0].p}%)</span>
       <span class="chip">+2.5 : <b>${Math.round(p.over25)}%</b></span>
       <span class="chip">B2M : <b>${Math.round(p.btts)}%</b></span>
+      ${p.valueBet? `<span class="chip gold2">💰 VALUE ${p.valueBet.side} (+${p.valueBet.edge}%)</span>`:''}
       ${verdicts}
       <button class="details-btn" onclick="openMatch('${code}','${m.id}',event)">Analyse experte ▸</button>
     </div>
@@ -410,8 +418,16 @@ function render(){
     }
     if(dayHtml){
       const dl = dayLabel(d.day);
+      const today = todayUTC();
+      const collapsible = (d.day < today || sorted.indexOf(d) > 2) && !hasLive;
       html += `<div class="day-title">${hasLive?'<span class="tag livetag">🔴 EN DIRECT</span>':''}
-        <span class="tag ${dl.cls}">${dl.txt}</span><span class="date">${fmtDate(d.day)}</span></div>${dayHtml}`;
+        <span class="tag ${dl.cls}">${dl.txt}</span><span class="date">${fmtDate(d.day)}</span></div>`;
+      if(collapsible && !S.openDays.has(d.day)){
+        html += `<button class="day-toggle" onclick="toggleDay('${d.day}',this)">▸ Déplier les matchs de cette journée</button>
+          <div id="dx-${d.day}" style="display:none">${dayHtml}</div>`;
+      } else {
+        html += dayHtml;
+      }
     }
   }
   content.innerHTML = html || `<div class="empty"><div class="big">${S.filter==='live'?'🔴':'⚽'}</div>
@@ -421,6 +437,10 @@ function render(){
 
 // ========================= FLUX SSE TEMPS RÉEL =========================
 function ingest(feed){
+  // si rien n'a changé côté serveur (même version), ne pas re-rendre (anti-lag mobile)
+  if(feed.v !== undefined && feed.v === S.lastV) return;
+  S.lastV = feed.v;
+  S.feedTs = Date.parse(feed.generatedAt) || Date.now();
   // détecter changements de score pour le flash
   if(S.feed){
     for(const d of feed.days) for(const lg of d.leagues) for(const m of lg.matches){
@@ -443,6 +463,10 @@ function ingest(feed){
   $('#statsprog').style.width = (feed.statsTotal? Math.round(100*feed.statsReady/feed.statsTotal):0)+'%';
   $('#statstxt').textContent = `${feed.statsReady}/${feed.statsTotal} ligues analysées`;
   $('#updAt').textContent = 'maj ' + new Date(feed.generatedAt).toLocaleTimeString('fr-FR') + ' · données en continu';
+  if(feed.accuracy){
+    $('#accPill').style.display='inline-flex';
+    $('#accTxt').textContent = ` ${feed.accuracy.pct}% ✓ (${feed.accuracy.n} matchs) · 💎 ${feed.accuracy.safePct}%`;
+  }
   const sy = window.scrollY;
   render(); renderTopPicks();
   window.scrollTo(0, sy);
@@ -460,6 +484,25 @@ function connectSSE(){
 connectSSE();
 // filet de secours si SSE tombe complètement
 setInterval(()=>{ if(es && es.readyState===2) fetch('/api/feed',{cache:'no-store'}).then(r=>r.json()).then(ingest).catch(()=>{}); }, 20000);
+
+// Déplier un jour masqué (résultats d'hier / jours lointains)
+function toggleDay(day, btn){
+  S.openDays.add(day);
+  const el = document.getElementById('dx-'+day);
+  if(el) el.style.display='block';
+  if(btn) btn.remove();
+}
+
+// ⏱ Horloge locale : fait tourner les minutes des matchs en direct
+// PENDANT les intervalles entre deux poussées serveur (expérience fluide type Flashscore)
+setInterval(()=>{
+  if(!S.feed) return;
+  document.querySelectorAll('.badge-live[data-clock]').forEach(b=>{
+    const cs = +b.dataset.clock || 0, ts = +b.dataset.ts || Date.now();
+    const m = Math.min(90, Math.max(1, Math.ceil((cs + (Date.now()-ts)/1000)/60)));
+    b.innerHTML = `<span class="dot"></span>${m}'`;
+  });
+}, 30000);
 
 $('#refreshBtn').addEventListener('click', ()=>{ fetch('/api/feed?force=1',{cache:'no-store'}).then(r=>r.json()).then(ingest).catch(()=>{}); });
 

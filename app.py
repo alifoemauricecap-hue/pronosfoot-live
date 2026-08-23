@@ -32,8 +32,15 @@ ESPN_SUMMARY    = "https://site.api.espn.com/apis/site/v2/sports/soccer/{code}/s
 
 STATS_DAYS = 150
 FEED_PAST, FEED_AHEAD = 1, 8
-LIVE_INTERVAL = 15      # secondes entre deux boucles live
-FEED_INTERVAL_IDLE = 90
+LIVE_INTERVAL = 25      # secondes entre deux boucles live
+FEED_INTERVAL_IDLE = 120
+
+def cdn_small(url, size=80):
+    """Petites vignettes de logos (gain de data massif sur mobile 3G)."""
+    if not url or "a.espncdn.com" not in url:
+        return url
+    path = url.split("a.espncdn.com")[-1]
+    return f"https://a.espncdn.com/combiner/i?img={path}&w={size}&h={size}"
 
 GROUPS = {
     "europe":        {"label": "Europe",            "icon": "🇪🇺"},
@@ -150,7 +157,7 @@ def parse_event(e, lmeta):
         for c in comp.get("competitors", []):
             t = c.get("team", {})
             node = {"id": t.get("id"), "name": t.get("shortDisplayName") or t.get("displayName") or t.get("name"),
-                    "full": t.get("displayName") or t.get("name"), "logo": t.get("logo"),
+                    "full": t.get("displayName") or t.get("name"), "logo": cdn_small(t.get("logo")),
                     "score": c.get("score"), "winner": c.get("winner", False), "shootout": c.get("shootoutScore")}
             if c.get("homeAway") == "home": home = node
             else: away = node
@@ -182,10 +189,14 @@ def fetch_league_window(code, chunks, ttl=60):
             if not isinstance(d, dict): continue
             if not league_logo and d.get("leagues"):
                 logos = d["leagues"][0].get("logos") or []
-                if logos: league_logo = logos[0].get("href")
+                if logos: league_logo = cdn_small(logos[0].get("href"))
             for e in d.get("events", []):
                 p = parse_event(e, lmeta)
                 if p: events[p["id"]] = p
+    # FILTRE STRICT : ne garder que les matchs réellement programmés dans la
+    # fenêtre demandée (l'API renvoie parfois des événements hors-plage)
+    w_start = int(chunks[0][:8]); w_end = int(chunks[-1][-8:])
+    events = {k: v for k, v in events.items() if w_start <= int(v["day"].replace("-", "")) <= w_end}
     result = {"events": sorted(events.values(), key=lambda x: x["utc"]),
               "leagueLogo": league_logo, "fetchedAt": time.time()}
     cache_set(cache_key, result, ttl)
@@ -270,6 +281,14 @@ def ensure_stats_async(code):
 # ---------------------------------------------------------------------------
 def poisson(k, lam): return math.exp(-lam) * lam ** k / math.factorial(k)
 
+def poisson_pmf(lam, n=10):
+    """Distribution de Poisson complète 0..n par récurrence — beaucoup plus
+    rapide que factorielle à chaque appel (gain CPU x10 sur serveur mutualisé)."""
+    ps = [math.exp(-lam)]
+    for i in range(1, n + 1):
+        ps.append(ps[-1] * lam / i)
+    return ps
+
 def team_rates(t, loc):
     if t["sw"] <= 0.05: return None, None
     gf_overall, ga_overall = t["gf"] / t["sw"], t["ga"] / t["sw"]
@@ -338,10 +357,11 @@ def predict_match(stats, home_id, away_id, minute=None, score=None, momentum=Non
     MAXG = 10
     p1 = px = p2 = over15 = over25 = over35 = btts = 0.0
     cells = []
+    dist_h, dist_a = poisson_pmf(lam_h, MAXG), poisson_pmf(lam_a, MAXG)
     for i in range(MAXG + 1):
-        pi = poisson(i, lam_h)
+        pi = dist_h[i]
         for j in range(MAXG + 1):
-            p = pi * poisson(j, lam_a)
+            p = pi * dist_a[j]
             fh, fa = cur_h + i, cur_a + j
             if fh > fa: p1 += p
             elif fh == fa: px += p
@@ -364,7 +384,8 @@ def predict_match(stats, home_id, away_id, minute=None, score=None, momentum=Non
             mh, md, ma = ph / tot, pd_ / tot, pa_ / tot
             w = min(0.65, 0.25 + 0.45 * (1 - reliab))
             p1, px, p2 = (1 - w) * p1 + w * mh, (1 - w) * px + w * md, (1 - w) * p2 + w * ma
-            odds_info = {"p1": round(mh * 100), "px": round(md * 100), "p2": round(ma * 100), "w": round(w * 100)}
+            odds_info = {"p1": round(mh * 100), "px": round(md * 100), "p2": round(ma * 100), "w": round(w * 100),
+                         "raw": (mh, md, ma)}
 
     markets = build_markets(p1, px, p2, over15, over25, over35, btts)
     # Pari le plus sûr : probabilité × fiabilité
@@ -380,7 +401,19 @@ def predict_match(stats, home_id, away_id, minute=None, score=None, momentum=Non
     safe_prob = safe[2]
     safe_stars = 1 if safe_prob < 0.55 else (2 if safe_prob < 0.65 else (3 if safe_prob < 0.72 else (4 if safe_prob < 0.82 else 5)))
 
-    return {"p1": round(p1 * 100, 1), "px": round(px * 100, 1), "p2": round(p2 * 100, 1),
+    # Détection de VALUE BET : l'IA est nettement plus confiante que le marché
+    value = None
+    if odds_info and not live:
+        mh, md, ma = odds_info["raw"]
+        for side, pm, mk in (("1", p1, mh), ("N", px, md), ("2", p2, ma)):
+            edge = pm - mk
+            if edge >= 0.08 and pm >= 0.35 and (value is None or edge > value[1]):
+                value = (side, round(edge * 100))
+    odds_info_out = None
+    if odds_info:
+        odds_info_out = {k: v for k, v in odds_info.items() if k != "raw"}
+
+    res = {"p1": round(p1 * 100, 1), "px": round(px * 100, 1), "p2": round(p2 * 100, 1),
             "pick": "1" if p1 >= px and p1 >= p2 else ("N" if px >= p2 else "2"),
             "topScores": [{"s": f"{fh}-{fa}", "p": round(p * 100, 1)} for p, fh, fa in cells[:5]],
             "over15": round(over15 * 100, 1), "over25": round(over25 * 100, 1), "over35": round(over35 * 100, 1),
@@ -390,7 +423,10 @@ def predict_match(stats, home_id, away_id, minute=None, score=None, momentum=Non
             "safePick": {"label": safe[0], "p": round(safe[2] * 100, 1), "stars": safe_stars, "kind": safe[3]},
             "xgH": round(lam_h, 2), "xgA": round(lam_a, 2),
             "stars": stars, "reliab": round(reliab, 2), "live": live,
-            "marketOdds": odds_info}
+            "marketOdds": odds_info_out}
+    if value:
+        res["valueBet"] = {"side": value[0], "edge": value[1]}
+    return res
 
 # ---------------------------------------------------------------------------
 # PARSING SUMMARY (stats live, timeline, compos, blessés, cotes)
@@ -582,6 +618,89 @@ def expert_analysis(home_name, away_name, pred, home_t, away_t, h2h, injuries, l
     return P
 
 # ---------------------------------------------------------------------------
+# SUIVI DE PRÉCISION DE L'IA (persisté sur disque)
+# ---------------------------------------------------------------------------
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+ACC_FILE = os.path.join(DATA_DIR, "accuracy.json")
+_acc = {"records": {}}
+_acc_lock = threading.Lock()
+_acc_dirty = False
+
+def _load_acc():
+    try:
+        with open(ACC_FILE, encoding="utf-8") as f:
+            _acc["records"] = json.load(f).get("records", {})
+    except Exception:
+        pass
+
+def eval_pick_on_result(label, kind, hg, ag):
+    """Le marché prédit était-il gagnant au regard du score final ?"""
+    if kind == "1N2":
+        real = "1" if hg > ag else ("N" if hg == ag else "2")
+        want = "1" if "(1)" in label else ("N" if label.startswith("Match nul") else "2")
+        return real == want
+    if kind == "DC":
+        if label.startswith("1N"): return hg >= ag
+        if label.startswith("N2"): return hg <= ag
+        if label.startswith("12"): return hg != ag
+    if kind == "BUTS":
+        tot = hg + ag
+        if label.startswith("Plus de"):
+            return tot > to_float(label.split("Plus de ")[1].split(" but")[0].replace(",", "."), 99) + 0.5
+        if label.startswith("Moins de"):
+            return tot < to_float(label.split("Moins de ")[1].split(" but")[0].replace(",", "."), 0)
+    if kind == "BTTS":
+        return (hg > 0 and ag > 0) == ("OUI" in label)
+    return None
+
+def record_accuracy(code, m):
+    pred = m.get("pred")
+    if not pred or m["state"] != "post" or m["home"]["score"] is None or m["away"]["score"] is None:
+        return
+    key = f"{code}:{m['id']}"
+    global _acc_dirty
+    with _acc_lock:
+        if key in _acc["records"]:
+            return
+        hg, ag = to_int(m["home"]["score"]), to_int(m["away"]["score"])
+        real = "1" if hg > ag else ("N" if hg == ag else "2")
+        safe = pred["safePick"]
+        _acc["records"][key] = {"pick": pred["pick"], "real": real, "ok": pred["pick"] == real,
+                                "safeOk": eval_pick_on_result(safe["label"], safe["kind"], hg, ag),
+                                "safeP": safe["p"], "day": m["day"]}
+        if len(_acc["records"]) > 4000:
+            _acc["records"] = dict(sorted(_acc["records"].items(), key=lambda kv: kv[1]["day"])[-4000:])
+        _acc_dirty = True
+
+def acc_summary():
+    with _acc_lock:
+        recs = list(_acc["records"].values())
+    n = len(recs)
+    if n < 5:
+        return None
+    hits = sum(1 for r in recs if r["ok"])
+    safe_recs = [r for r in recs if r["safeOk"] is not None]
+    sh = sum(1 for r in safe_recs if r["safeOk"])
+    return {"n": n, "pct": round(100 * hits / n, 1),
+            "safeN": len(safe_recs), "safePct": round(100 * sh / len(safe_recs), 1) if safe_recs else 0}
+
+def acc_flush_loop():
+    global _acc_dirty
+    while True:
+        time.sleep(60)
+        with _acc_lock:
+            if _acc_dirty:
+                try:
+                    with open(ACC_FILE, "w", encoding="utf-8") as f:
+                        json.dump({"records": _acc["records"]}, f)
+                except Exception as e:
+                    print("[acc]", e)
+                _acc_dirty = False
+
+_load_acc()
+
+# ---------------------------------------------------------------------------
 # ÉTAT GLOBAL + BOUCLES TEMPS RÉEL + SSE
 # ---------------------------------------------------------------------------
 STATE = {"feed": None, "version": 0, "liveCount": 0, "topPicks": [], "updatedAt": None}
@@ -668,6 +787,7 @@ def enrich_match(ev, code):
                                           momentum=mom, odds=odds_probs)
             elif ev["state"] == "post" and ev["home"]["score"] is not None:
                 m["pred"] = predict_match(stats, ev["home"]["id"], ev["away"]["id"])
+                record_accuracy(code, m)
         except Exception as ex:
             print(f"[pred] {code}/{ev['id']}: {ex}")
     return m
@@ -704,18 +824,43 @@ def build_feed_payload():
     top = compute_top_picks(feed_blocks)
     payload = {"generatedAt": datetime.now(timezone.utc).isoformat(), "liveCount": live_count,
                "statsReady": sum(1 for lg in LEAGUES if cache_get(f"stats:{lg['code']}") is not None),
-               "statsTotal": len(LEAGUES), "topPicks": top, "days": feed_blocks,
+               "statsTotal": len(LEAGUES), "topPicks": top, "accuracy": acc_summary(),
+               "days": feed_blocks,
                "liveIds": ["%s:%s" % x for x in live_ids]}
     return payload
 
+def feed_signature(payload):
+    """Empreinte des données qui comptent (hors horloges) : on ne pousse vers
+    les navigateurs que si quelque chose a VRAIMENT changé."""
+    parts = []
+    for day in payload["days"]:
+        for lg in day["leagues"]:
+            for m in lg["matches"]:
+                p = m.get("pred") or {}
+                st = ""
+                if m.get("liveStats"):
+                    st = "|".join(f"{round(r.get('poss', 0))}{round(r.get('shots', 0))}{round(r.get('corners', 0))}" for r in m["liveStats"])
+                parts.append(f"{m['id']}{m['state']}{m['home']['score']}{m['away']['score']}{p.get('p1')}{p.get('p2')}{st}")
+    return hash(tuple(parts))
+
+BCAST_COUNTER = {"n": 0}
+
 def refresh_state(force=False):
     payload = build_feed_payload()
+    sig = feed_signature(payload)
     with STATE_LOCK:
+        changed = sig != STATE.get("sig")
+        if changed:
+            STATE["version"] += 1
+        STATE["sig"] = sig
         STATE["feed"] = payload
-        STATE["version"] += 1
         STATE["liveCount"] = payload["liveCount"]
         STATE["updatedAt"] = payload["generatedAt"]
-    sse_broadcast(json.dumps({"type": "feed", "v": STATE["version"], "data": payload}, ensure_ascii=False, separators=(",", ":")))
+        v = STATE["version"]
+    BCAST_COUNTER["n"] += 1
+    # Push si changement réel, ou toutes les ~4 boucles pour rafraîchir l'horloge de base
+    if changed or BCAST_COUNTER["n"] % 4 == 0:
+        sse_broadcast(json.dumps({"type": "feed", "v": v, "data": payload}, ensure_ascii=False, separators=(",", ":")))
     return payload
 
 def get_live_match_ids():
@@ -763,7 +908,7 @@ def index(): return send_from_directory("static", "index.html")
 def healthz():
     with STATE_LOCK:
         v, lc, up = STATE["version"], STATE["liveCount"], STATE["updatedAt"]
-    return {"ok": True, "version": v, "live": lc, "updatedAt": up, "build": "2.1-keepawake",
+    return {"ok": True, "version": v, "live": lc, "updatedAt": up, "build": "2.2-speed",
             "sseClients": len(SSE_CLIENTS),
             "statsReady": sum(1 for lg in LEAGUES if cache_get(f"stats:{lg['code']}") is not None)}
 
@@ -917,14 +1062,25 @@ def api_match_detail(code, event_id):
 # Démarrage
 # ---------------------------------------------------------------------------
 def warm_stats():
-    """Pré-chauffe les stats en arrière-plan."""
+    """Pré-chauffe UNIQUEMENT les ligues qui ont des matchs dans la fenêtre
+    (allège énormément le CPU sur l'offre gratuite au démarrage)."""
     time.sleep(2)
+    today = datetime.now(timezone.utc).date()
+    chunks = date_chunks(today - timedelta(days=FEED_PAST), today + timedelta(days=FEED_AHEAD), 9)
+    def has_events(lg):
+        try:
+            return bool(fetch_league_window(lg["code"], chunks, ttl=90)["events"])
+        except Exception:
+            return False
+    with ThreadPoolExecutor(max_workers=12) as ex:
+        actives = [lg for lg, ok in zip(LEAGUES, ex.map(has_events, LEAGUES)) if ok]
+    print(f"[warm] {len(actives)} ligues avec matchs à analyser")
     def st(lg):
         try: build_stats(lg["code"])
         except Exception as e: print(f"[warm] {lg['code']}: {e}")
     with ThreadPoolExecutor(max_workers=6) as ex:
-        list(ex.map(st, LEAGUES))
-    print("[warm] toutes les stats sont prêtes")
+        list(ex.map(st, actives))
+    print("[warm] stats prêtes")
     try: refresh_state()
     except Exception: pass
 
@@ -950,6 +1106,7 @@ threading.Thread(target=feed_loop, daemon=True).start()
 threading.Thread(target=live_detail_loop, daemon=True).start()
 threading.Thread(target=warm_stats, daemon=True).start()
 threading.Thread(target=keep_awake_loop, daemon=True).start()
+threading.Thread(target=acc_flush_loop, daemon=True).start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
