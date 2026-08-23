@@ -763,7 +763,7 @@ def index(): return send_from_directory("static", "index.html")
 def healthz():
     with STATE_LOCK:
         v, lc, up = STATE["version"], STATE["liveCount"], STATE["updatedAt"]
-    return {"ok": True, "version": v, "live": lc, "updatedAt": up,
+    return {"ok": True, "version": v, "live": lc, "updatedAt": up, "build": "2.1-keepawake",
             "sseClients": len(SSE_CLIENTS),
             "statsReady": sum(1 for lg in LEAGUES if cache_get(f"stats:{lg['code']}") is not None)}
 
@@ -928,9 +928,28 @@ def warm_stats():
     try: refresh_state()
     except Exception: pass
 
+def keep_awake_loop():
+    """Anti-sommeil : l'app se ping elle-même via son URL publique toutes les 5 min,
+    ce qui génère du trafic entrant et empêche la mise en veille (Render free, etc.).
+    Actif uniquement si l'hébergeur fournit le nom d'hôte public (RENDER_EXTERNAL_HOSTNAME)
+    ou si SELF_URL est défini."""
+    host = os.environ.get("RENDER_EXTERNAL_HOSTNAME") or os.environ.get("SELF_URL")
+    if not host:
+        return
+    url = host if host.startswith("http") else f"https://{host}"
+    print(f"[keepawake] actif — auto-ping {url}/healthz toutes les 300s")
+    time.sleep(60)  # laisser l'app démarrer complètement
+    while True:
+        try:
+            http_json(url + "/healthz", retries=0, timeout=12)
+        except Exception as e:
+            print(f"[keepawake] ping raté: {e}")
+        time.sleep(300)
+
 threading.Thread(target=feed_loop, daemon=True).start()
 threading.Thread(target=live_detail_loop, daemon=True).start()
 threading.Thread(target=warm_stats, daemon=True).start()
+threading.Thread(target=keep_awake_loop, daemon=True).start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
