@@ -1,0 +1,10 @@
+# Déploiement 1-clic sur Render.com (offre gratuite)
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: pronofoot-live
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /healthz
