@@ -212,7 +212,7 @@ footer{max-width:1280px;margin:0 auto;padding:20px 18px 40px;color:var(--muted2)
       <div class="sub">Pronostics IA · temps réel</div></div>
     </div>
     <div class="spacer"></div>
-    <div class="acc-pill" id="accPill">🎯 IA <b id="accTxt"></b></div>
+    <div class="acc-pill" id="accPill" style="display:none">⏳ <b id="accTxt"></b></div>
     <div class="sse" id="ssePill"><span class="dot"></span><span id="sseTxt">CONNEXION…</span></div>
     <div class="live-pill off" id="livePill"><span class="dot"></span><span id="liveTxt">0 en direct</span></div>
     <button class="icon-btn" id="refreshBtn" title="Actualiser">↻</button>
@@ -221,7 +221,7 @@ footer{max-width:1280px;margin:0 auto;padding:20px 18px 40px;color:var(--muted2)
 </header>
 
 <div class="topband" id="topband" style="display:none">
-  <h2>💎 Pronos d'Or — les paris les plus sûrs du moment <span class="liveupd" id="updAt"></span></h2>
+  <h2>💎 Pronos d'Or — pronos gelés les plus sûrs (avant-match uniquement) <span class="liveupd" id="updAt"></span></h2>
   <div class="strip" id="picksStrip"></div>
 </div>
 
@@ -248,9 +248,11 @@ footer{max-width:1280px;margin:0 auto;padding:20px 18px 40px;color:var(--muted2)
 </main>
 
 <footer>
-  ⚽ <b>PronoFoot Live 2.0</b> — Application connectée en <b>temps réel</b> (flux direct continu, scores et statistiques poussés automatiquement
-  toutes les 15 secondes pendant les matchs). Probabilités issues d'un moteur IA combinant <b>modèle de Poisson pondéré</b> (forme ~150 jours, forces
+  ⚽ <b>PronoFoot Live 3.0</b> — Application connectée en <b>temps réel</b> (flux direct continu, scores et statistiques poussés automatiquement
+  toutes les 15 secondes pendant les matchs). Probabilités issues d'un moteur combinant <b>modèle de Poisson pondéré</b> (forme ~150 jours, forces
   domicile/extérieur), <b>momentum live</b> (tirs, possession, corners), <b>cotes réelles des bookmakers</b> et <b>absences/blessures</b>.<br>
+  🔒 <b>Socle de vérité</b> : toutes les prédictions sont <b>gelées avant le coup d'envoi</b>, horodatées, hachées et archivées de façon immuable.
+  Le bilan est calculé exclusivement sur ces pronos gelés — jamais sur des recalculs après-match.<br>
   ⚠️ Pronostics fournis à titre <b>informatif et ludique</b>. Aucun résultat n'est garanti. Jouez de manière responsable.
 </footer>
 
@@ -266,12 +268,16 @@ footer{max-width:1280px;margin:0 auto;padding:20px 18px 40px;color:var(--muted2)
     l'extérieur, forme des 6 derniers matchs, confrontations directes.<br><br>
     <b>3 · Données expertes</b> — quand elles existent : <b>blessures et suspensions</b> (impact appliqué au modèle),
     <b>compositions</b>, <b>cotes réelles des bookmakers</b> fusionnées à 25% avec le modèle, statistiques de la rencontre en direct.<br><br>
-    <b>4 · Projection de Poisson + momentum</b> — distribution des buts attendus recalculée en direct selon le score, le temps
-    restant et la domination réelle du match.<br><br>
+    <b>4 · 🔒 Prédictions gelées</b> — chaque prono est publié AVANT le coup d'envoi, horodaté, haché (SHA-256) et
+    <b>immuable</b> (verrouillé en base). Une composition officielle tardive crée une nouvelle version sans jamais effacer
+    l'ancienne. Un match terminé sans prono pré-match est marqué <b>« Non évalué »</b> : le bilan n'invente jamais rien.<br><br>
     <b>5 · 💎 Prono le plus sûr</b> — l'IA évalue les 12 marchés (1N2, doubles chances, over/under, BTTS…) et désigne celui à la
-    plus forte probabilité ajustée par la fiabilité des données. Les meilleurs sont épinglés dans les <b>Pronos d'Or</b>.
-    <div class="warn">⚠️ Aucune IA ne connaît l'avenir : météo, arbitres, coups du sort… Ces probabilités sont un
-    <b>outil d'aide à la décision</b>, pas une garantie. Jouez responsable.</div>
+    plus forte probabilité ajustée par la fiabilité des données. Les meilleurs sont épinglés dans les <b>Pronos d'Or</b>
+    (exclusivement des pronos gelés avant-match).
+    <div class="warn">⚠️ Les probabilités actuelles sont <b>brutes (non calibrées)</b> — la calibration arrive à l'étape
+    suivante (2C). Le bilan de précision ne s'affiche que sur des pronos gelés et réglés en quantité suffisante
+    (l'ancien système, qui notait des pronos recalculés après les matchs, a été supprimé). Aucune IA ne connaît
+    l'avenir : c'est un <b>outil d'aide à la décision</b>, pas une garantie. Jouez responsable.</div>
   </div>
 </div></div>
 
@@ -312,20 +318,27 @@ const stars = n => '★'.repeat(n)+'☆'.repeat(5-n);
 function predBlock(m, code){
   const p = m.pred;
   if(!p){
+    if(m.state==='post' && m.notEvaluable)
+      return `<div class="pred pending" style="flex-direction:column;align-items:flex-start;gap:3px">📭 Non évalué — aucune prédiction pré-match gelée avant ce match
+        <span style="font-weight:500;color:var(--muted2);font-size:11px">Règle anti-fuite : jamais de prono recalculé après coup.</span></div>`;
     if(m.predPending && m.state!=='post') return `<div class="pred pending"><span class="spin"></span>Analyse IA en cours…</div>`;
     return '';
   }
+  const post = m.state==='post', live = m.state==='in';
+  const frozenChip = p.frozenAt ? `<span class="chip" title="Prédiction gelée le ${new Date(p.frozenAt).toLocaleString('fr-FR')} — horodatée, hachée, immuable">🔒 gelée ${fmtHour(p.frozenAt)} · v${p.v||1}</span>` : '';
+  let verdicts='';
+  if(post && p.verdicts){
+    const v=p.verdicts;
+    const vd = b => (b===null||b===undefined)?'':verdict(b);
+    if(v.pick) verdicts += `<span class="chip" title="Verdict de la prédiction gelée pré-match (jamais recalculée)">IA ${esc(v.pick)} ${vd(v.pickOk)}</span>`;
+    if(v.safeOk!==null && v.safeOk!==undefined) verdicts += `<span class="chip" title="Le « pari le plus sûr » affiché avant le match : ${esc(v.safeLabel||'')}">💎 ${vd(v.safeOk)}</span>`;
+  }
+  if(p.p1===undefined){
+    return `<div class="pred"><div class="pick-line">${verdicts}${frozenChip}</div></div>`;
+  }
   const p1=Math.round(p.p1), px=Math.round(p.px), p2=Math.round(p.p2);
   const w = v => Math.max(v, 7);
-  let verdicts='';
-  if(m.state==='post' && m.home.score!=null){
-    const hg=+m.home.score, ag=+m.away.score;
-    const real = hg>ag?'1':hg<ag?'2':'N';
-    verdicts = `<span class="chip">IA ${esc(p.pick)} ${verdict(p.pick===real)}</span>
-      <span class="chip">${p.over25>50?'+':'−'}2.5 ${verdict((p.over25>50)===((hg+ag)>2.5))}</span>
-      <span class="chip">B2M ${verdict((p.btts>50)===(hg>0&&ag>0))}</span>`;
-  }
-  const live = m.state==='in';
+  const midLabel = (post||live) ? '🔒 GELÉE PRÉ-MATCH' : 'PROBAS IA';
   return `<div class="pred">
     <div class="safepick" title="Pari le plus sûr selon l'IA">
       <span class="ic">💎</span>
@@ -333,7 +346,7 @@ function predBlock(m, code){
       <span class="st">${stars(p.safePick.stars)}</span>
       <span class="pct">${Math.round(p.safePick.p)}%</span>
     </div>
-    <div class="bar-labels"><span>1 · ${esc(m.home.name)}</span><b class="big">${live?'🔴 PROJ. TEMPS RÉEL':'PROBAS IA'}</b><span>2 · ${esc(m.away.name)}</span></div>
+    <div class="bar-labels"><span>1 · ${esc(m.home.name)}</span><b class="big">${midLabel}</b><span>2 · ${esc(m.away.name)}</span></div>
     <div class="pbar"><div class="pseg s1" style="flex-basis:${w(p1)}%"><span>${p1}%</span></div>
       <div class="pseg sx" style="flex-basis:${w(px)}%"><span>N ${px}%</span></div>
       <div class="pseg s2" style="flex-basis:${w(p2)}%"><span>${p2}%</span></div></div>
@@ -342,7 +355,7 @@ function predBlock(m, code){
       <span class="chip">+2.5 : <b>${Math.round(p.over25)}%</b></span>
       <span class="chip">B2M : <b>${Math.round(p.btts)}%</b></span>
       ${p.valueBet? `<span class="chip gold2">💰 VALUE ${p.valueBet.side} (+${p.valueBet.edge}%)</span>`:''}
-      ${verdicts}
+      ${verdicts}${frozenChip}
       <button class="details-btn" onclick="openMatch('${code}','${m.id}',event)">Analyse experte ▸</button>
     </div>
     <div class="xg-line">Buts attendus : ${m.home.name} ${p.xgH} — ${p.xgA} ${m.away.name}</div>
@@ -384,7 +397,7 @@ function renderTopPicks(){
       <div class="lg">${esc(c.flag)} ${esc(c.lname)}</div>
       <div class="teams">${esc(c.home)} — ${esc(c.away)}</div>
       <div class="pick"><span class="lab">${esc(c.label)}</span><span class="pct">${Math.round(c.p)}%</span></div>
-      <div class="stars">${stars(c.stars)} · pari le plus sûr</div>
+      <div class="stars">${stars(c.stars)} · 🔒 gelée${c.frozenAt?' '+fmtHour(c.frozenAt):''} · pari le plus sûr</div>
     </div>`).join('');
 }
 
@@ -463,9 +476,16 @@ function ingest(feed){
   $('#statsprog').style.width = (feed.statsTotal? Math.round(100*feed.statsReady/feed.statsTotal):0)+'%';
   $('#statstxt').textContent = `${feed.statsReady}/${feed.statsTotal} ligues analysées`;
   $('#updAt').textContent = 'maj ' + new Date(feed.generatedAt).toLocaleTimeString('fr-FR') + ' · données en continu';
-  if(feed.accuracy){
+  const ev = feed.evaluation;
+  if(ev && ev.status==='ready'){
     $('#accPill').style.display='inline-flex';
-    $('#accTxt').textContent = ` ${feed.accuracy.pct}% ✓ (${feed.accuracy.n} matchs) · 💎 ${feed.accuracy.safePct}%`;
+    $('#accPill').title = 'Bilan honnête : calculé UNIQUEMENT sur des prédictions gelées avant le coup d\'envoi, réglées au résultat réel (anti-fuite)';
+    $('#accTxt').textContent = `🎯 IA ${ev.accuracy1N2}% ✓ (${ev.settledMatches} matchs gelés) · Brier ${ev.brier1N2}`;
+  } else if(ev){
+    $('#accPill').style.display='inline-flex';
+    $('#accPill').style.borderColor='rgba(143,161,184,.4)';
+    $('#accPill').title = 'L\'ancien système de précision (contaminé, supprimé) a été remplacé : le bilan ne s\'affichera qu\'avec assez de prédictions gelées avant-match réglées. Aucune donnée n\'est inventée.';
+    $('#accTxt').textContent = ` Évaluation en reconstruction (${ev.settledMatches||0}/${ev.minimum||20} matchs gelés réglés)`;
   }
   const sy = window.scrollY;
   render(); renderTopPicks();
@@ -581,7 +601,11 @@ function renderMatchDetail(body, d){
   const urlTab = `
     <div class="tabpane active" id="tp0">
       ${(d.analysis||[]).map(t=>`<div class="ana-p">${esc(t)}</div>`).join('') || '<div class="info-box">Analyse en préparation…</div>'}
-      ${p? `<div class="bar-labels" style="margin-top:14px"><span>1 · ${esc(m.home.name)}</span><b class="big">PROBABILITÉS IA ${m.state==='in'?'(TEMPS RÉEL)':''}</b><span>2 · ${esc(m.away.name)}</span></div>
+      ${m.state==='post' && !p? `<div class="info-box">📭 <b>Non évalué</b> — aucune prédiction pré-match gelée avant ce match.<br>Par règle anti-fuite, l'application ne recalcule jamais un prono après coup pour le faire passer pour une prédiction.</div>`:''}
+      ${m.state==='post' && p && p.verdicts? `<div class="info-box" style="border-left:3px solid ${p.verdicts.pickOk?'var(--green)':'var(--red)'}">
+        🔒 <b>Prédiction gelée${p.frozenAt?` le ${new Date(p.frozenAt).toLocaleString('fr-FR')}`:''} · v${p.v||1}</b> — verdict au résultat réel :
+        IA ${esc(p.verdicts.pick||'?')} ${p.verdicts.pickOk?'✔':'✘'}${p.verdicts.safeOk!==null&&p.verdicts.safeOk!==undefined?` · 💎 pari le plus sûr (${esc(p.verdicts.safeLabel||'')}) ${p.verdicts.safeOk?'✔':'✘'}`:''}</div>`:''}
+      ${p? `<div class="bar-labels" style="margin-top:14px"><span>1 · ${esc(m.home.name)}</span><b class="big">PROBABILITÉS IA${p.frozen?' · 🔒 GELÉE':''}</b><span>2 · ${esc(m.away.name)}</span></div>
       <div class="pbar"><div class="pseg s1" style="flex-basis:${Math.max(p.p1,7)}%"><span>${Math.round(p.p1)}%</span></div>
         <div class="pseg sx" style="flex-basis:${Math.max(p.px,7)}%"><span>N ${Math.round(p.px)}%</span></div>
         <div class="pseg s2" style="flex-basis:${Math.max(p.p2,7)}%"><span>${Math.round(p.p2)}%</span></div></div>
