@@ -1,23 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-PACKAGE sources.web — ÉTAPE 2B.WEB-1 (MATCH IDENTITY ENGINE + SOURCE DISCOVERY)
-===============================================================================
-Portée STRICTE :
-- identité de matchs hors-ligne (aucune requête réseau, jamais) ;
-- découverte de sources pilotée UNIQUEMENT par sources/registry.json (2B.1) ;
-- aucune collecte Internet (les adapters/collecteurs ne sont PAS implémentés) ;
-- aucun import du socle 2A (db/app/engine/repository/prediction_service) ;
-- aucune écriture en base de données — fonctions pures et déterministes.
+PACKAGE sources.web — 2B.WEB-1 → 2B.WEB-3
+==========================================
+- WEB-1 : Match Identity Engine + Source Discovery (hors-ligne)
+- WEB-2 : Safe HTTP + Compliance Gate (couche réseau unique et gardée)
+- WEB-3 : Ingestion réelle multi-sources (adapters/extractors, provenance,
+  validation, conflits, fraîcheur, point-in-time store, orchestrateur,
+  snapshot builder — additif, aucun code 2A/2B.1/WEB-0/WEB-1/WEB-2 modifié)
 
-Modules :
-- decision  : coefficients centralisés, seuils, règles de statut (§9/§14/§15)
-- identity  : normalisation, alias (via sources/entity_map.json), MatchIdentity
-- source_discovery : discover_sources(data_type) depuis le registry réel
-
-Invariants : UNKNOWN ≠ FALSE · jamais d'identifiant inventé · une contradiction
-majeure n'est jamais annulée par un score élevé · ambiguïté => UNKNOWN.
+Invariants : UNKNOWN ≠ FALSE · aucune donnée inventée · aucun réseau hors
+SafeHttpClient · aucune mutation du passé (append-only / insert-only) ·
+ambiguïté => UNKNOWN.
 """
-from . import decision, identity, source_discovery  # noqa: F401
+from . import decision, identity, source_discovery  # noqa: F401  (WEB-1)
+from . import compliance, safe_http, response       # noqa: F401  (WEB-2)
 
-__version__ = "2B.WEB-1"
-__all__ = ["decision", "identity", "source_discovery"]
+__version__ = "2B.WEB-3"
+__all__ = ["decision", "identity", "source_discovery",
+           "compliance", "safe_http", "response"]

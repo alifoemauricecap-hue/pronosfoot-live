@@ -1,0 +1,21 @@
+{
+  "fixture": "SYNTHÉTIQUE — structure identique à la réponse forecast/hourly Open-Meteo réelle",
+  "latitude": 54.975,
+  "longitude": -1.6175,
+  "generationtime_ms": 0.42,
+  "utc_offset_seconds": 0,
+  "timezone": "GMT",
+  "hourly": {
+    "time": [
+      "2026-09-06T17:00", "2026-09-06T18:00", "2026-09-06T19:00",
+      "2026-09-06T20:00"
+    ],
+    "temperature_2m": [14.2, 13.8, 13.1, 12.6],
+    "apparent_temperature": [12.9, 12.4, 11.6, 11.2],
+    "relative_humidity_2m": [71, 74, 78, 81],
+    "precipitation": [0.0, 0.0, 0.2, 0.5],
+    "precipitation_probability": [10, 15, 35, 55],
+    "wind_speed_10m": [11.5, 12.2, 13.8, 14.1],
+    "weather_code": [3, 3, 61, 61]
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "fixture": "SYNTHÉTIQUE — structure identique au summary ESPN réel (boxscore.teams.statistics labels EN, boxscore.players, injuries)",
+  "boxscore": {
+    "teams": [
+      {"team": {"id": "361", "displayName": "Newcastle United"},
+       "statistics": [
+         {"name": "Possession", "displayValue": "54.3%"},
+         {"name": "Shots", "displayValue": "15"},
+         {"name": "On Goal", "displayValue": "6"},
+         {"name": "Corner Kicks", "displayValue": "7"},
+         {"name": "Fouls", "displayValue": "9"},
+         {"name": "Yellow Cards", "displayValue": "1"},
+         {"name": "Red Cards", "displayValue": "0"}
+       ]},
+      {"team": {"id": "374", "displayName": "Aston Villa"},
+       "statistics": [
+         {"name": "Possession", "displayValue": "45.7%"},
+         {"name": "Shots", "displayValue": "9"},
+         {"name": "On Goal", "displayValue": "3"},
+         {"name": "Corner Kicks", "displayValue": "4"},
+         {"name": "Fouls", "displayValue": "12"},
+         {"name": "Yellow Cards", "displayValue": "2"},
+         {"name": "Red Cards", "displayValue": "0"}
+       ]}
+    ],
+    "players": [
+      {"team": {"id": "361", "displayName": "Newcastle United"},
+       "statistics": [{"athletes": [
+         {"athlete": {"displayName": "Nick Pope", "position": {"abbreviation": "G"}}, "starter": true},
+         {"athlete": {"displayName": "Kieran Trippier", "position": {"abbreviation": "D"}}, "starter": true},
+         {"athlete": {"displayName": "Alexander Isak", "position": {"abbreviation": "F"}}, "starter": true},
+         {"athlete": {"displayName": "Joe Willock", "position": {"abbreviation": "M"}}, "starter": false}
+       ]}]},
+      {"team": {"id": "374", "displayName": "Aston Villa"},
+       "statistics": [{"athletes": [
+         {"athlete": {"displayName": "Emiliano Martinez", "position": {"abbreviation": "G"}}, "starter": true},
+         {"athlete": {"displayName": "Ollie Watkins", "position": {"abbreviation": "F"}}, "starter": true}
+       ]}]}
+    ]
+  },
+  "injuries": [
+    {"team": {"id": "361", "displayName": "Newcastle United"},
+     "injuries": [
+       {"athlete": {"displayName": "Sven Botman"}, "status": "Out",
+        "shortComment": "Knee injury"}
+     ]}
+  ]
+}

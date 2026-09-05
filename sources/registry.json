@@ -1,5 +1,5 @@
 {
-  "registry_version": "2B.1",
+  "registry_version": "2B.1+wikidata",
   "generated_at": "2026-09-05T08:45:00Z",
   "policy": {
     "unknown_not_false": true,
@@ -15,7 +15,7 @@
     "match_stats", "form", "h2h", "lineups", "injuries", "suspensions", "odds",
     "historical_odds", "odds_movement", "xg", "xga", "shots", "shots_on_target",
     "big_chances", "corners", "cards", "possession", "weather", "news",
-    "historical_results", "events"
+    "historical_results", "events", "entity_identity"
   ],
   "ttl_defaults_sec": {
     "score_live": 30,
@@ -34,6 +34,7 @@
     "xga": null,
     "historical_results": null,
     "historical_odds": null,
+    "entity_identity": 86400,
     "_comment": "null = pas d'expiration (donnée historique). Configurable par clé, surcharge possible par source (champ ttl_overrides_sec). Une donnée expirée = stale, jamais injectée dans un snapshot."
   },
   "priorities": {
@@ -62,7 +63,8 @@
     "possession": ["espn"],
     "weather": ["open_meteo"],
     "news": ["espn"],
-    "events": ["espn"]
+    "events": ["espn"],
+    "entity_identity": ["wikidata"]
   },
   "sources": [
     {
@@ -568,6 +570,26 @@
       "reliability": {"score": 0.0, "basis": "NON TESTÉE lors de l'audit 2B (honnêteté : aucune capacité n'est affirmée)"},
       "notes": "listée ici uniquement parce que le contexte V3/V4 la cite ; son évaluation est planifiée, pas faite.",
       "risks": ["blocage probable (protection industrive type Flashscore)", "ToS"]
+    },
+    {
+      "source_id": "wikidata",
+      "name": "Wikidata",
+      "type": "api",
+      "base_url": "https://www.wikidata.org",
+      "status": "TESTED",
+      "enabled": true,
+      "authentication": "none",
+      "free": true,
+      "quota": "poli (API publique Wikimedia)",
+      "coverage": "identite entites (clubs/competitions/stades), alias, pays, QID",
+      "capabilities": {"entity_identity": true},
+      "priority_role": "identity",
+      "ttl_overrides_sec": {},
+      "fallback": {},
+      "last_tested": "2026-09-05T08:25:00Z",
+      "reliability": {"score": 0.8},
+      "notes": "CC0. IDENTITE UNIQUEMENT (2B.WEB-3 section 10) - jamais de statistiques sportives. Q483020 = Paris Saint-Germain FC verifie en 2B.WEB-0 ; re-teste a la vraie API en 2B.WEB-3 (REAL_FETCH_PASS).",
+      "risks": ["donnees communautaires", "pas de stat sportive"]
     }
   ],
   "entity_mapping": {

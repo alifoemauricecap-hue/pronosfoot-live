@@ -273,12 +273,22 @@ def test_sources_validees_presentes(discovery):
         assert src["enabled"] is True and src["status"] == "TESTED"
 
 
-def test_wikidata_pas_encore_dans_registry(discovery):
-    # Honnêteté : wikidata a été testé (2B.WEB-0) mais n'est PAS encore
-    # enregistré dans registry.json — l'audit l'avait proposé, la validation
-    # humaine décidera. Le moteur ne prétend PAS qu'elle existe côté registry.
-    ids = {s["source_id"] for s in REG["sources"]}
-    assert "wikidata" not in ids                  # UNKNOWN ≠ FALSE documenté
+def test_wikidata_desormais_dans_registry(discovery):
+    # Évolution officielle (2B.WEB-3 §2, source 6 autorisée) : wikidata a été
+    # AJOUTÉE au registry — IDENTITÉ UNIQUEMENT (§10 : jamais de stat sportive).
+    # Ce test remplace « test_wikidata_pas_encore_dans_registry » : la
+    # candidature Annexe C de l'audit est devenue une entrée validée.
+    wd = regmod.get_source(REG, "wikidata")
+    assert wd is not None
+    assert wd["status"] == "TESTED" and wd["enabled"] is True
+    assert wd["base_url"] == "https://www.wikidata.org"
+    caps = wd["capabilities"]
+    # délimitation honnête : identité seule, aucune capacité statistique
+    assert caps.get("entity_identity") is True
+    for stat_cap in ("xg", "odds", "score_live", "standings", "shots"):
+        assert stat_cap not in caps
+    # et la découverte la propose bien pour SON type
+    assert "wikidata" in discovery.discover("entity_identity")
 
 
 def test_discovery_donnees_type_inconnu_list_vide(discovery):

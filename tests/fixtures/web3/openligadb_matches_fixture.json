@@ -1,0 +1,52 @@
+[
+ {
+  "matchID": 70001,
+  "matchDateTimeUTC": "2026-08-22T13:30:00Z",
+  "team1": {
+   "teamName": "FC Bayern München"
+  },
+  "team2": {
+   "teamName": "VfL Wolfsburg"
+  },
+  "matchIsFinished": true,
+  "matchResults": [
+   {
+    "resultTypeID": 2,
+    "resultName": "Endergebnis",
+    "pointsTeam1": 3,
+    "pointsTeam2": 1
+   }
+  ]
+ },
+ {
+  "matchID": 70002,
+  "matchDateTimeUTC": "2026-08-29T13:30:00Z",
+  "team1": {
+   "teamName": "VfL Wolfsburg"
+  },
+  "team2": {
+   "teamName": "Borussia Dortmund"
+  },
+  "matchIsFinished": true,
+  "matchResults": [
+   {
+    "resultTypeID": 2,
+    "resultName": "Endergebnis",
+    "pointsTeam1": 0,
+    "pointsTeam2": 2
+   }
+  ]
+ },
+ {
+  "matchID": 70003,
+  "matchDateTimeUTC": "2026-09-12T13:30:00Z",
+  "team1": {
+   "teamName": "FC Bayern München"
+  },
+  "team2": {
+   "teamName": "Borussia Dortmund"
+  },
+  "matchIsFinished": false,
+  "matchResults": []
+ }
+]
