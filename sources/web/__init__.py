@@ -15,6 +15,9 @@ ambiguïté => UNKNOWN.
 from . import decision, identity, source_discovery  # noqa: F401  (WEB-1)
 from . import compliance, safe_http, response       # noqa: F401  (WEB-2)
 
-__version__ = "2B.WEB-3"
+__version__ = "2B.WEB-4"
 __all__ = ["decision", "identity", "source_discovery",
            "compliance", "safe_http", "response"]
+# NOTE WEB-4 : le sous-package `web4` (ingestion persistante) n'est PAS
+# importé ici volontairement — ce package reste PASSIF (aucun effet de bord
+# réseau/BD à l'import). app.py l'initialise explicitement via start_web4().

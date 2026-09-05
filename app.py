@@ -825,17 +825,41 @@ def healthz():
     with STATE_LOCK:
         v, lc, up = STATE["version"], STATE["liveCount"], STATE["updatedAt"]
     dbc = db_layer.table_counts()
+    # §31 WEB-4 : bloc ADDITIF uniquement — ok/integrity/build/migration
+    # inchangés ; un problème de donnée ne rend JAMAIS le cœur DOWN
+    # (CORE_HEALTH ≠ DATA_HEALTH).
+    try:
+        from sources.web.web4 import diagnostics as w4d
+        ingestion = w4d.healthz_block()
+    except Exception:
+        ingestion = {"enabled": False, "core_health": "ok",
+                     "data_health": "unknown", "last_successful_cycle": None}
     return {"ok": True, "version": v, "live": lc, "updatedAt": up, "build": BUILD_MARKER,
             "sseClients": len(SSE_CLIENTS),
             "statsReady": sum(1 for lg in LEAGUES if cache_get(f"stats:{lg['code']}") is not None),
             "db": {"migration": db_layer.migration_version(), "integrity": bool(db_layer.integrity_check()),
                    "matches": dbc["matches"], "predictions": dbc["predictions"],
-                   "snapshots": dbc["data_snapshots"], "results": dbc["results"]}}
+                   "snapshots": dbc["data_snapshots"], "results": dbc["results"]},
+            "ingestion": ingestion}
 
 @app.route("/api/config")
 def api_config():
     return jsonify({"leagues": LEAGUES, "groups": GROUPS,
                     "serverTime": datetime.now(timezone.utc).isoformat()})
+
+
+# ---------------------------------------------------------------------------
+# ÉTAPE 2B.WEB-4 — DIAGNOSTIC D'INGESTION (§30) — ADDITIF, jamais de secrets
+# ---------------------------------------------------------------------------
+@app.route("/api/ingestion/status")
+def api_ingestion_status():
+    try:
+        from sources.web.web4 import diagnostics as w4d
+        return jsonify(w4d.ingestion_status())
+    except Exception as ex:
+        return jsonify({"ok": False, "status": "unavailable",
+                        "core_health": "ok",
+                        "error": f"{type(ex).__name__}: {ex}"}), 200
 
 def feed_response():
     with STATE_LOCK:
@@ -1093,6 +1117,63 @@ def keep_awake_loop():
             print(f"[keepawake] ping raté: {e}")
         time.sleep(300)
 
+def start_web4():
+    """ÉTAPE 2B.WEB-4 — démarre le scheduler d'ingestion continue.
+
+    ADDITIF ET NON BLOQUANT : tout échec ici laisse le LIVE fonctionner
+    (§25). Désactivable avec PRONOFOOT_WEB4=0. Le scheduler est restart-safe
+    (état SQLite — §37) et borné canary (5 matchs/cycle, 8 req/match).
+    """
+    if os.environ.get("PRONOFOOT_WEB4", "1") == "0":
+        print("[web4] désactivé (PRONOFOOT_WEB4=0)")
+        return None
+    try:
+        from sources import registry as _regmod
+        from sources.web.safe_http import SafeHttpClient
+        from sources.web.orchestrator import ResearchOrchestrator
+        from sources.web.quality_metrics import QualityMetrics
+        from sources.web.web4 import (diagnostics as w4d,
+                                      journal_sqlite as w4j,
+                                      metrics as w4m,
+                                      persistent_cache as w4c,
+                                      pit_sqlite as w4p,
+                                      scheduler as w4s)
+        reg = _regmod.load()
+        store = w4p.PersistentPITStore()
+        journal = w4j.PersistentResearchJournal()
+        imetrics = w4m.IngestionMetrics()
+        cache = w4c.WebCacheSQLite()
+        client = SafeHttpClient(registry=reg, cache=cache)
+        qm = QualityMetrics()
+
+        def factory():
+            return ResearchOrchestrator(client, registry=reg, store=store,
+                                        journal=journal, metrics=qm)
+
+        sched = w4s.IngestionScheduler(factory, store, journal,
+                                       metrics=imetrics, registry=reg)
+        w4d.set_runtime(scheduler=sched, client=client, cache=cache)
+
+        def runner():
+            time.sleep(20)                # laisser le boot 2A se stabiliser
+            try:
+                rec = sched.recover_on_boot()
+                if rec.get("recovered"):
+                    print("[web4] cycle RECOVERY exécuté après (re)démarrage")
+            except Exception as e:
+                print(f"[web4] recovery: {type(e).__name__}: {e}")
+            sched.serve_forever()
+
+        threading.Thread(target=runner, daemon=True).start()
+        print("[web4] ingestion continue démarrée — canary "
+              f"(≤{sched.config['matches_per_cycle']} matchs/cycle, "
+              f"budget {sched.config['requests_per_match_budget']} req/match)")
+        return sched
+    except Exception as e:
+        print(f"[web4] DÉSACTIVÉ (non bloquant) : {type(e).__name__}: {e}")
+        return None
+
+
 def start_workers():
     """§18 — SÉQUENCE DE DÉMARRAGE : DATABASE → schéma/migrations → restauration
     → modèle actif → cache → workers → Live → SSE. Aucune reconstruction longue :
@@ -1104,6 +1185,7 @@ def start_workers():
     threading.Thread(target=warm_stats, daemon=True).start()
     threading.Thread(target=keep_awake_loop, daemon=True).start()
     backup.start()
+    start_web4()                          # WEB-4 — additif, jamais bloquant
 
 
 if os.environ.get("PRONOFOOT_NO_THREADS") != "1":

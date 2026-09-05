@@ -281,8 +281,161 @@ SCHEMA_V1 = [
     "CREATE TRIGGER trg_results_no_delete BEFORE DELETE ON results BEGIN SELECT RAISE(ABORT, 'RESULTAT OFFICIEL : suppression interdite'); END",
 ]
 
+# ---------------------------------------------------------------------------
+# MIGRATION v2 (ÉTAPE 2B.WEB-4) — 100 % ADDITIVE : nouvelles tables uniquement.
+# Aucune table 2A n'est modifiée ; les triggers d'immuabilité sont intacts.
+# La sauvegarde fichier (backup.py) couvre automatiquement ces tables (§24).
+# ---------------------------------------------------------------------------
+SCHEMA_V2 = [
+    # §3/§4 — CACHE HTTP PERSISTANT. Jamais une source de vérité : une entrée
+    # peut expirer ou être REMPLACÉE (contrairement aux snapshots). AUCUNE URL
+    # n'est stockée en clair (url_hash seulement) : impossible de fuiter une
+    # clé présente dans une query-string. Aucun header n'est stocké (§38).
+    """CREATE TABLE web_cache (
+        cache_key TEXT PRIMARY KEY,
+        source_id TEXT NOT NULL,
+        url_hash TEXT NOT NULL,
+        data_type TEXT,
+        response_payload BLOB NOT NULL,
+        status INTEGER,
+        retrieved_at TEXT NOT NULL,
+        expires_at REAL,
+        content_type TEXT,
+        response_size INTEGER,
+        checksum TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX idx_web_cache_source ON web_cache(source_id)",
+    "CREATE INDEX idx_web_cache_exp ON web_cache(expires_at)",
+    # §5/§6 — POINT-IN-TIME STORE PERSISTANT (append-only) : chaque nouvelle
+    # observation = une NOUVELLE ligne (versionnage temporel). dedupe_key
+    # bloque uniquement les DOUBLONS EXACTS, jamais les versions distinctes.
+    """CREATE TABLE web_datapoints (
+        id TEXT PRIMARY KEY,
+        dedupe_key TEXT NOT NULL UNIQUE,
+        match_id TEXT,
+        team_id TEXT,
+        player_id TEXT,
+        competition_id TEXT,
+        data_type TEXT NOT NULL,
+        level TEXT NOT NULL,
+        value_json TEXT,
+        is_unknown INTEGER NOT NULL DEFAULT 0,
+        source_id TEXT NOT NULL,
+        source_url TEXT,
+        retrieved_at TEXT NOT NULL,
+        published_at TEXT,
+        effective_at TEXT,
+        confidence TEXT,
+        valid INTEGER NOT NULL DEFAULT 1,
+        issues_json TEXT,
+        checksum TEXT NOT NULL,
+        derivation_method TEXT,
+        model_version TEXT,
+        inputs_json TEXT,
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX idx_wdp_match ON web_datapoints(match_id, data_type)",
+    "CREATE INDEX idx_wdp_retrieved ON web_datapoints(retrieved_at)",
+    "CREATE INDEX idx_wdp_source ON web_datapoints(source_id)",
+    # §23/§28 — JOURNAL DE RECHERCHE PERSISTANT (whitelist de colonnes :
+    # aucune clé interdite ne peut exister ici, par construction — §38).
+    """CREATE TABLE web_research_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL,
+        event TEXT,
+        match_id TEXT,
+        source TEXT,
+        data_type TEXT,
+        host TEXT,
+        status TEXT,
+        latency_ms REAL,
+        bytes INTEGER,
+        cache_hit INTEGER,
+        records_found INTEGER,
+        confidence TEXT,
+        freshness TEXT,
+        decision_json TEXT,
+        error TEXT
+    )""",
+    "CREATE INDEX idx_wre_match ON web_research_events(match_id)",
+    "CREATE INDEX idx_wre_source ON web_research_events(source)",
+    "CREATE INDEX idx_wre_ts ON web_research_events(timestamp)",
+    # §8 — CYCLES D'INGESTION REGROUPÉS (jamais 50 jobs par match).
+    """CREATE TABLE web_ingestion_cycles (
+        cycle_id TEXT PRIMARY KEY,
+        trigger TEXT NOT NULL,
+        phase TEXT,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        match_count INTEGER DEFAULT 0,
+        request_count INTEGER DEFAULT 0,
+        cache_hits INTEGER DEFAULT 0,
+        errors_json TEXT,
+        duration_ms INTEGER,
+        status TEXT,
+        detail_json TEXT
+    )""",
+    "CREATE INDEX idx_wic_started ON web_ingestion_cycles(started_at)",
+    # §17/§18 — ENTITY MAP PERSISTANTE (seuils WEB-1 : AUTO ≥0.95,
+    # JOURNALIZED 0.80–0.95, sinon UNKNOWN jamais auto-mappé).
+    """CREATE TABLE web_entities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_type TEXT NOT NULL,
+        internal_key TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        external_name TEXT,
+        confidence REAL,
+        status TEXT NOT NULL,
+        decided_by TEXT,
+        decided_at TEXT NOT NULL,
+        evidence_json TEXT,
+        UNIQUE (entity_type, source_id, external_id)
+    )""",
+    "CREATE INDEX idx_we_internal ON web_entities(entity_type, internal_key)",
+    # §19 — RÉFÉRENTIEL STADES MINIMAL : coordonnées OBLIGATOIRES et
+    # sourcées (jamais de coordonnées de pays approximatives).
+    """CREATE TABLE web_venues (
+        venue_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        city TEXT,
+        country TEXT,
+        latitude REAL NOT NULL,
+        longitude REAL NOT NULL,
+        source TEXT NOT NULL,
+        confidence REAL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    # §28 — COMPTEURS D'OBSERVABILITÉ persistants (qualité DONNÉES, jamais
+    # métriques du modèle — voir quality_metrics.assert_no_model_metrics).
+    """CREATE TABLE web_metrics (
+        key TEXT PRIMARY KEY,
+        value REAL NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+    )""",
+    # §37 — ÉTAT DU SCHEDULER : survit au restart (Render free suspend).
+    """CREATE TABLE web_scheduler_state (
+        key TEXT PRIMARY KEY,
+        value_json TEXT,
+        updated_at TEXT NOT NULL
+    )""",
+    # §29 — ALERTES INTERNES (WARNING / ERROR / CRITICAL).
+    """CREATE TABLE web_alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        level TEXT NOT NULL,
+        code TEXT NOT NULL,
+        detail_json TEXT,
+        at_utc TEXT NOT NULL
+    )""",
+    "CREATE INDEX idx_wa_at ON web_alerts(at_utc)",
+]
+
 MIGRATIONS = [
     (1, "schema initial : persistance + predictions gelees + anti-fuite", SCHEMA_V1),
+    (2, "web4 : ingestion persistante (cache+PIT+journal+cycles+entites)", SCHEMA_V2),
 ]
 
 

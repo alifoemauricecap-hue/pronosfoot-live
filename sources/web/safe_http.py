@@ -190,11 +190,13 @@ class SafeHttpClient:
 
     Paramètres injectables : registry (défaut = fichier réel), gate de
     compliance, config (fusionnée sur SAFE_HTTP_CONFIG), clock (tests),
-    logger(callable) pour la journalisation structurée (§27).
+    logger(callable) pour la journalisation structurée (§27), et — WEB-4
+    ADDITIF — `cache` : backend de cache interchangeable (défaut = mémoire,
+    interface get/set/__len__/key — ex. WebCacheSQLite persistant).
     """
 
     def __init__(self, registry=None, gate=None, config=None, clock=None,
-                 logger=None):
+                 logger=None, cache=None):
         self.reg = registry or _regmod.load()
         self.gate = gate or _comp.ComplianceGate(self.reg)
         self.config = dict(SAFE_HTTP_CONFIG)
@@ -207,7 +209,9 @@ class SafeHttpClient:
         self.logger = logger
         self._rl = _RateLimiter(self.config, clock=self.clock)
         self._cb = _CircuitBreaker(self.config, clock=self.clock)
-        self._cache = _MemoryCache(clock=self.clock)
+        # WEB-4 : backend de cache interchangeable (défaut = mémoire §23) ;
+        # l'interface imposée est celle de _MemoryCache (get/set/__len__/key).
+        self._cache = cache if cache is not None else _MemoryCache(clock=self.clock)
         self._log_lock = threading.Lock()
 
     # -- journal structuré (§27) : jamais Authorization/cookies/token -------
