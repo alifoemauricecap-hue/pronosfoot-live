@@ -17,6 +17,7 @@ connaissent que ces fonctions. Toutes les écritures respectent les règles :
 import hashlib
 import json
 import re
+import sqlite3
 import unicodedata
 import uuid
 
@@ -284,21 +285,36 @@ def evaluation_rows(where="", params=(), limit=None):
 
 
 def evaluation_versions_filter():
-    """(match_id, version_seq) des versions de référence évaluables :
-    dernière version gelée avant coup d'envoi pour chaque match réglé."""
-    return db.rows_to_dicts(db.query("""
-        SELECT p.match_id, p.version_seq FROM predictions p
-        JOIN matches m ON m.id=p.match_id
-        WHERE p.version_seq = (SELECT MAX(p2.version_seq) FROM predictions p2
-                               WHERE p2.match_id=p.match_id AND p2.frozen_at <= p2.kickoff_time_utc)"""))
+    """(match_id, version_seq) des versions de référence évaluables — MÊME
+    règle que le règlement : référence T-15 d'abord, sinon dernière ≤ kickoff."""
+    seen, out = set(), []
+    for r in evaluation_rows_latest():
+        k = (r["match_id"], r["version_seq"])
+        if k not in seen:
+            seen.add(k)
+            out.append({"match_id": r["match_id"], "version_seq": r["version_seq"]})
+    return out
 
 
-def evaluation_rows_latest(limit=None):
-    """Toutes les lignes des versions gelées DE RÉFÉRENCE (dernière version
-    avant coup d'envoi) avec leur règlement éventuel — base unique et honnête
-    de toutes les métriques publiques."""
-    sql = """WITH ev AS (SELECT match_id, MAX(version_seq) AS seq FROM predictions
-                         WHERE frozen_at <= kickoff_time_utc GROUP BY match_id)
+# Version de RÉFÉRENCE d'évaluation, alignée sur le règlement (settlement) :
+# 1. la version marquée « t15_reference » dans le journal, si elle existe ET
+#    qu'elle est valide (gelée ≤ coup d'envoi) ;
+# 2. sinon la plus récente gelée avant le coup d'envoi.
+# NOTE portage PostgreSQL : json_extract(x,'$.a') → (x::jsonb->>'a')::int.
+_EVAL_REF_CTE = """WITH latest AS (SELECT match_id, MAX(version_seq) AS seq FROM predictions
+                            WHERE frozen_at <= kickoff_time_utc GROUP BY match_id),
+              t15 AS (SELECT e.match_id,
+                             CAST(json_extract(e.detail_json, '$.version_seq') AS INTEGER) AS seq
+                      FROM prediction_events e WHERE e.event = 't15_reference'),
+              ev AS (SELECT l.match_id,
+                            CASE WHEN t.seq IS NOT NULL AND EXISTS (
+                                     SELECT 1 FROM predictions p3
+                                     WHERE p3.match_id = l.match_id AND p3.version_seq = t.seq
+                                       AND p3.frozen_at <= p3.kickoff_time_utc)
+                                 THEN t.seq ELSE l.seq END AS seq
+                     FROM latest l LEFT JOIN t15 t ON t.match_id = l.match_id)"""
+
+_EVAL_ROWS_BODY = """
              SELECT p.id, p.match_id, p.market, p.selection, p.published_probability,
                     p.raw_probability, p.bookmaker_odds, p.distribution_json, p.model_name,
                     p.model_version, p.version_seq, p.frozen_at, p.kickoff_time_utc, p.prediction_status,
@@ -309,9 +325,23 @@ def evaluation_rows_latest(limit=None):
              JOIN matches m ON m.id=p.match_id
              LEFT JOIN prediction_results r ON r.prediction_id=p.id
              ORDER BY p.frozen_at DESC"""
-    if limit:
-        sql += f" LIMIT {int(limit)}"
-    return db.rows_to_dicts(db.query(sql))
+
+
+def evaluation_rows_latest(limit=None):
+    """Toutes les lignes des versions gelées DE RÉFÉRENCE — la MÊME règle que
+    le règlement : version « t15_reference » si valide, sinon dernière version
+    gelée avant coup d'envoi. Base unique et honnête des métriques publiques
+    (micro-correctif agrégation ÉTAPE 2A : ne JAMAIS choisir arbitrairement la
+    dernière version quand une référence de settlement existe)."""
+    suffix = f" LIMIT {int(limit)}" if limit else ""
+    try:
+        return db.rows_to_dicts(db.query(_EVAL_REF_CTE + _EVAL_ROWS_BODY + suffix))
+    except sqlite3.OperationalError:
+        # Repli défensif (ex. build SQLite sans JSON1) : ancienne règle
+        # « dernière version ≤ kickoff » — jamais de donnée inventée.
+        legacy = """WITH ev AS (SELECT match_id, MAX(version_seq) AS seq FROM predictions
+                                WHERE frozen_at <= kickoff_time_utc GROUP BY match_id)"""
+        return db.rows_to_dicts(db.query(legacy + _EVAL_ROWS_BODY + suffix))
 
 
 # ---------------------------------------------------------------------------

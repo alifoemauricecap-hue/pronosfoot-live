@@ -303,3 +303,68 @@ def test_14_anti_fuite_modification_du_futur():
     predsvc.invalidate_all()
     disp = predsvc.frozen_display(CODE, make_ev(state="post", hg="9", ag="0", completed=True), with_verdicts=True)
     assert disp is not None
+
+
+# ---------------------------------------------------------------------------
+# TEST 16 — micro-correctif agrégation : l'agrégateur public suit la RÉFÉRENCE
+# T-15 (celle du règlement), même en présence d'une version post-T-15.
+# ---------------------------------------------------------------------------
+def test_16_agregation_suit_la_reference_t15():
+    """v1 (T-60) → v2 (référence marquée à T-15) → v3 (post-T-15, ≤ kickoff).
+    Le règlement s'attache à v2 : l'agrégateur DOIT compter le match réglé
+    et relire les lignes de v2 — jamais celles de v3. Idempotence incluse."""
+    mid = "espn:test.1:EAGG"
+    detail_v2 = {"injuries": {"home": [{}], "away": []}, "lineups": [{"x": 1}],
+                 "odds_probs": None, "odds_dec": None, "odds_provider": None}
+    detail_v3 = {"injuries": {"home": [{}], "away": []}, "lineups": [{"x": 1}],
+                 "odds_probs": (0.55, 0.25, 0.20), "odds_dec": {"1": 1.60, "N": 3.60, "2": 6.00},
+                 "odds_provider": "BookX"}
+    assert publish(ev=make_ev("EAGG", hours=1))["v"] == 1
+    assert publish(ev=make_ev("EAGG", hours=1), detail=detail_v2)["v"] == 2
+    predsvc.ensure_t15_reference(CODE, make_ev("EAGG", hours=0.2))   # T-12 : référence = v2
+    assert publish(ev=make_ev("EAGG", hours=0.2), detail=detail_v3)["v"] == 3
+
+    ev_post = make_ev("EAGG", state="post", hg="0", ag="2", completed=True)
+    appmod.persist_match(CODE, ev_post)
+    out = predsvc.settle_if_finished(CODE, ev_post)
+    assert out["status"] == "SETTLED" and out["markets_scored"] == 6
+
+    # le règlement est attaché à la version T-15 (v2), PAS à v3
+    res = db_layer.rows_to_dicts(db_layer.query(
+        """SELECT DISTINCT p.version_seq AS v FROM prediction_results pr
+           JOIN predictions p ON p.id = pr.prediction_id WHERE p.match_id = %s""", (mid,)))
+    assert {r["v"] for r in res} == {2}
+
+    # agrégateur : le match EST compté (et uniquement sur v2)
+    perf = predsvc.public_performance(force=True)
+    assert perf["status"] == "rebuilding" and perf["settledMatches"] == 1
+    mine = [r for r in repo.evaluation_rows_latest() if r["match_id"] == mid]
+    assert len(mine) == 6 and {r["version_seq"] for r in mine} == {2}
+    assert all(r["won"] is not None and r["prediction_status"] == "SETTLED" for r in mine)
+
+    # NOT_EVALUABLE exclu : match terminé sans prédiction pré-match
+    # (le flux réel persiste toujours le match avant enrichissement)
+    ev_ne = make_ev("EAGG2", state="post", hg="1", ag="1", completed=True)
+    appmod.persist_match(CODE, ev_ne)
+    out3 = predsvc.settle_if_finished(CODE, ev_ne)
+    assert out3["status"] == "NOT_EVALUABLE"
+    perf2 = predsvc.public_performance(force=True)
+    assert perf2["settledMatches"] == 1     # toujours 1 — le NOT_EVALUABLE ne compte pas
+
+    # VOID exclu : match annulé/reporté
+    publish(ev=make_ev("EVOID", hours=3))
+    ev_void = make_ev("EVOID", state="post", completed=True)
+    ev_void["detail"] = "postponed"   # reporté → VOID
+    appmod.persist_match(CODE, ev_void)
+    out4 = predsvc.settle_if_finished(CODE, ev_void)
+    assert out4["status"] == "VOID"
+    perf3 = predsvc.public_performance(force=True)
+    assert perf3["settledMatches"] == 1     # VOID exclu
+
+    # double settlement : idempotent, zéro doublon
+    out5 = predsvc.settle_if_finished(CODE, ev_post)
+    assert out5.get("skipped") is True
+    assert db_layer.query("SELECT COUNT(*) c FROM prediction_results", one=True)["c"] == 6
+
+    # aucune modification des prédictions gelées / hashes / snapshots
+    assert all(predsvc.verify_prediction(r) for r in repo.predictions_history(mid))
