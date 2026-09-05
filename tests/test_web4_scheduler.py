@@ -427,7 +427,9 @@ class TestBackupRestore:
             f.write(gzip.decompress(gzpath.read_bytes()))
         db_layer.init(path=dst, reset=True)
         assert db_layer.integrity_check()                 # intègre
-        assert db_layer.migration_version() == 2
+        # v2 WEB-4 appliquée (la v3 2C, additive, fait monter le max à 3 :
+        # l'exigence historique « v2 présente » est préservée, non affaiblie)
+        assert db_layer.migration_version() >= 2
 
 
 # ===========================================================================
@@ -547,7 +549,8 @@ class TestDiagnostics:
         assert h["ok"] is True and h["db"]["integrity"] is True
         assert "ingestion" in h
         assert h["ingestion"]["core_health"] == "ok"
-        assert h["db"]["migration"] == 2
+        # idem : migration v3 (2C, additive) — v2 toujours présente (>= 2)
+        assert h["db"]["migration"] >= 2
 
     def test_35_api_ingestion_status_route(self):
         c = appmod.app.test_client()

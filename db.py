@@ -433,9 +433,79 @@ SCHEMA_V2 = [
     "CREATE INDEX idx_wa_at ON web_alerts(at_utc)",
 ]
 
+# ---------------------------------------------------------------------------
+# MIGRATION v3 (ÉTAPE 2C — EXPERIMENTAL) — 100 % ADDITIVE.
+# Tables du moteur SHADOW 2C. Aucune table v1/v2 n'est modifiée ; les
+# triggers d'immuabilité 2A sont intacts. 2C reste invisible du frontend
+# et ne remplace jamais 2A (§32/§34 du cahier 2C).
+# ---------------------------------------------------------------------------
+SCHEMA_V3 = [
+    # §24 — REGISTRE DES MODÈLES 2C (statuts EXPERIMENTAL→…→RETIRED)
+    """CREATE TABLE model2c_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        model_id TEXT NOT NULL,
+        version TEXT NOT NULL,
+        features_json TEXT,
+        feature_version TEXT,
+        training_window_json TEXT,
+        calibration_version TEXT,
+        dataset_hash TEXT,
+        code_hash TEXT,
+        metrics_json TEXT,
+        created_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'EXPERIMENTAL',
+        UNIQUE (model_id, version)
+    )""",
+    # §25 — PRÉDICTIONS SHADOW (append-only, invisibles publiquement)
+    """CREATE TABLE predictions_2c_shadow (
+        id TEXT PRIMARY KEY,
+        match_id TEXT NOT NULL,
+        prediction_time TEXT NOT NULL,
+        model_version TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        raw_probabilities TEXT NOT NULL,
+        calibrated_probabilities TEXT,
+        features_hash TEXT,
+        dataset_hash TEXT,
+        data_quality_json TEXT,
+        sample_size INTEGER DEFAULT 0,
+        calibration_version TEXT,
+        code_hash TEXT,
+        status TEXT NOT NULL DEFAULT 'EXPERIMENTAL',
+        shadow_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX idx_p2cs_match ON predictions_2c_shadow(match_id)",
+    "CREATE INDEX idx_p2cs_model ON predictions_2c_shadow(model_id)",
+    # §4 — FEATURE SNAPSHOTS (vecteur par match, hashé, versionné, traçable)
+    """CREATE TABLE features_2c (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        match_id TEXT NOT NULL,
+        team_id TEXT,
+        feature_name TEXT NOT NULL,
+        feature_value REAL,
+        feature_json TEXT,
+        as_of TEXT NOT NULL,
+        source TEXT,
+        snapshot_id TEXT,
+        feature_version TEXT NOT NULL,
+        feature_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX idx_f2c_match ON features_2c(match_id)",
+    # APPEND-ONLY : une prédiction shadow ne se modifie ni ne se supprime
+    """CREATE TRIGGER trg_p2cs_no_update BEFORE UPDATE ON predictions_2c_shadow
+       BEGIN SELECT RAISE(ABORT, 'SHADOW 2C APPEND-ONLY : modification interdite'); END""",
+    """CREATE TRIGGER trg_p2cs_no_delete BEFORE DELETE ON predictions_2c_shadow
+       BEGIN SELECT RAISE(ABORT, 'SHADOW 2C APPEND-ONLY : suppression interdite'); END""",
+    """CREATE TRIGGER trg_f2c_no_delete BEFORE DELETE ON features_2c
+       BEGIN SELECT RAISE(ABORT, 'FEATURE 2C APPEND-ONLY : suppression interdite'); END""",
+]
+
 MIGRATIONS = [
     (1, "schema initial : persistance + predictions gelees + anti-fuite", SCHEMA_V1),
     (2, "web4 : ingestion persistante (cache+PIT+journal+cycles+entites)", SCHEMA_V2),
+    (3, "2c experimental : shadow + registry + features (additif)", SCHEMA_V3),
 ]
 
 
