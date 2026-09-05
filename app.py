@@ -765,6 +765,13 @@ def live_detail_loop():
         ids = get_live_match_ids()
         if not ids:
             time.sleep(25); continue
+        for code, eid in ids:
+            try:
+                parsed = fetch_summary(code, eid, ttl=LIVE_INTERVAL - 2)
+                cache_set(f"livedetail:{code}:{eid}", parsed, 120)
+            except Exception as e:
+                print(f"[live_detail] {code}/{eid}: {e}")
+        time.sleep(max(8, LIVE_INTERVAL - 6))
 
 def get_prematch_ids(minutes=90):
     """Matchs À VENIR dont le coup d'envoi est dans moins de `minutes` min."""
@@ -804,13 +811,6 @@ def prematch_detail_loop():
         except Exception as e:
             print("[pre_detail]", e)
         time.sleep(180)
-        for code, eid in ids:
-            try:
-                parsed = fetch_summary(code, eid, ttl=LIVE_INTERVAL - 2)
-                cache_set(f"livedetail:{code}:{eid}", parsed, 120)
-            except Exception as e:
-                print(f"[live_detail] {code}/{eid}: {e}")
-        time.sleep(max(8, LIVE_INTERVAL - 6))
 
 # ---------------------------------------------------------------------------
 # Routes Flask
