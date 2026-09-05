@@ -1,0 +1,8 @@
+{
+  "version": "2B.1",
+  "description": "Correspondance identités INTERNES stables ↔ identifiants externes par source. VIDE par construction en 2B.1 : elle sera remplie par les ADAPTERS (2B.2+) via des clés fortes (date + équipes normalisées + compétition), jamais par devinette. Chaque ajout futur sera journalisé et révisable.",
+  "match_ids": {},
+  "team_ids": {},
+  "player_ids": {},
+  "competition_ids": {}
+}
