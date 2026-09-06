@@ -41,7 +41,7 @@ class TestComparator:
         comp = mk_runner(db).compare_with_2a()
         assert comp["T-180"]["n"] == 1
         assert comp["T-180"]["verdict"] == "INSUFFICIENT_SAMPLE"
-        assert "brier_2c" not in comp["T-180"]          # jamais de métrique sur 1
+        assert "brier_2c_calibrated" not in comp["T-180"]   # jamais de métrique sur 1
 
     def test_comparator_is_read_only_on_2a(self):
         _full_cycle_with_settlement()
@@ -59,9 +59,11 @@ class TestComparator:
             _full_cycle_with_settlement(f"espn:ger.1:M{i}")
         comp = mk_runner(db).compare_with_2a()
         e = comp["T-180"]
-        assert e["verdict"] == "OK" and e["n"] == 30
-        assert 0 <= e["brier_2c"] <= 2 and 0 <= e["brier_2a"] <= 2
-        assert e["logloss_2c"] > 0 and e["logloss_2a"] > 0
+        assert e["verdict"] == "OBSERVATION_ONLY" and e["n"] == 30
+        assert 0 <= e["brier_2c_calibrated"] <= 2 and 0 <= e["brier_2a"] <= 2
+        assert e["logloss_2c_calibrated"] > 0 and e["logloss_2a"] > 0
+        assert "brier_2c_raw" in e and "ece_2c_calibrated" in e
+        assert 0 <= e["ece_2c_calibrated"] <= 1 and 0 <= e["ece_2a"] <= 1
 
 
 class TestMonitor:

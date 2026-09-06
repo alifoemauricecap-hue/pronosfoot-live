@@ -250,8 +250,9 @@ class TestAntiLeak:
         _bayern_match("espn:ger.1:A2")
         s = mk_runner(db).run_once(now=NOW)
         ref = rows(db, "predictions_2c_shadow",
-                   "match_id='espn:ger.1:A2' AND status='NO_PREDICTION'")[0]
+                   "match_id='espn:ger.1:A2' AND status='REJECTED_LEAKAGE'")[0]
         assert ref["refusal_reason"].startswith("REFUSE_PREDICTION:LEAK")
+        assert ref["status"] == "REJECTED_LEAKAGE"
         assert rows(db, "model2c_shadow_alerts",
                     "code LIKE 'REFUSE_PREDICTION%' AND level='CRITICAL'")
         assert s["refusals"].get("REFUSE_PREDICTION", 0) >= 1
@@ -270,8 +271,9 @@ class TestAntiLeak:
         r._history = leaky_history
         r.run_once(now=NOW)
         ref = rows(db, "predictions_2c_shadow",
-                   "match_id='espn:ger.1:A3' AND status='NO_PREDICTION'")[0]
+                   "match_id='espn:ger.1:A3' AND status='REJECTED_LEAKAGE'")[0]
         assert ref["refusal_reason"] == "REFUSE_PREDICTION:LEAK_EFFECTIVE"
+        assert ref["status"] == "REJECTED_LEAKAGE"
         assert rows(db, "model2c_shadow_alerts",
                     "code='REFUSE_PREDICTION:LEAK_EFFECTIVE' AND level='CRITICAL'")
 
@@ -304,6 +306,7 @@ class TestCalibrationAndVersioning:
         assert abs(r["calibrated_home"] - expected["1"] / tot) < 1e-5
         assert abs(r["calibrated_away"] - expected["2"] / tot) < 1e-5
         assert r["calibration_version"] == "2c-calib-synth-test"
+        assert r["kickoff_time_utc"] and r["kickoff_time_utc"] > r["prediction_time"]
 
     def test_model_version_and_hashes_recorded(self):
         from model2c.shadow_prod import SHADOW_MODEL_VERSION
@@ -358,6 +361,9 @@ class TestPerformance:
         t = s["timings"]
         for k in ("feature_ms", "model_ms", "db_ms", "total_ms"):
             assert k in t and isinstance(t[k], int) and t[k] >= 0
+        assert "rusage" in s                      # §10 CPU/mémoire
+        if s["rusage"]:
+            assert s["rusage"]["max_rss_mb"] > 0 and s["rusage"]["user_cpu_s"] >= 0
 
     def test_heartbeat_written(self):
         mk_runner(db).run_once(now=NOW, cycle_id="hb1")

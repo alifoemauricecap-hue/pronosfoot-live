@@ -19,7 +19,7 @@ V4_COLS = {"snapshot_label", "refusal_reason", "raw_home", "raw_draw",
            "raw_away", "calibrated_home", "calibrated_draw", "calibrated_away",
            "max_feature_effective_at", "max_feature_retrieved_at",
            "source_match_id", "canonical_match_id", "identity_confidence",
-           "identity_method", "data_level", "feature_version"}
+           "identity_method", "data_level", "feature_version", "kickoff_time_utc"}
 
 V4_TABLES = {"model2c_shadow_alerts", "model2c_shadow_heartbeats",
              "model2c_team_events", "model2c_dc_params"}

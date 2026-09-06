@@ -115,6 +115,11 @@ def canonical_team(name):
     n = norm_name(name)
     if not n:
         return None
+    # §7 2C.2 — catégories SÉPARÉES : réserves / jeunes / féminin ne sont
+    # JAMAIS mappés sur une équipe senior (UNKNOWN, jamais forcé)
+    if (n.endswith((" ii", " u17", " u19", " u21", " u23"))
+            or any(tok in n for tok in (" women", " ladies", " frauen"))):
+        return None
     if n in ALIASES:
         return ALIASES[n]
     return n  # nom normalisé cohérent dans toutes les sources si identique

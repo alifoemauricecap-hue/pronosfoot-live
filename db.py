@@ -527,6 +527,8 @@ SCHEMA_V4 = [
     "ALTER TABLE predictions_2c_shadow ADD COLUMN identity_method TEXT",
     "ALTER TABLE predictions_2c_shadow ADD COLUMN data_level TEXT",
     "ALTER TABLE predictions_2c_shadow ADD COLUMN feature_version TEXT",
+    # §5 2C.2 : kickoff conservé dans chaque ligne (vérifiable sans jointure)
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN kickoff_time_utc TEXT",
     # ---- §13 : une prédiction par (match, modèle, label) — jamais remplacée
     """CREATE UNIQUE INDEX idx_p2cs_label_dedup
        ON predictions_2c_shadow(match_id, model_id, model_version, snapshot_label)

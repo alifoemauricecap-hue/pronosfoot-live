@@ -239,9 +239,9 @@ class ShadowRunner:
                 calibrated_home, calibrated_draw, calibrated_away,
                 max_feature_effective_at, max_feature_retrieved_at,
                 source_match_id, canonical_match_id, identity_confidence,
-                identity_method, data_level, feature_version)
+                identity_method, data_level, feature_version, kickoff_time_utc)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                       %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                       %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (pid, match["id"], t_iso, SHADOW_MODEL_VERSION, model_id,
              json.dumps(raw, sort_keys=True) if raw else "{}",
              json.dumps(cal, sort_keys=True) if cal else None,
@@ -255,7 +255,7 @@ class ShadowRunner:
              audit.get("max_feature_retrieved_at"),
              match.get("source_match_id"), match["id"],
              identity.get("confidence"), identity.get("method"),
-             dq.get("level"), FEATURE_VERSION))
+             dq.get("level"), FEATURE_VERSION, match.get("kickoff_time_utc")))
         return pid
 
     def _write_features(self, match_id, feats, as_of_iso, snapshot_id):
@@ -272,11 +272,52 @@ class ShadowRunner:
              FEATURE_VERSION, feats["feature_hash"], _iso(_utcnow())))
 
     # -------------------------------------------------------------- comparateur
+    @staticmethod
+    def _ece_top1(dists, outcomes, bins=10):
+        """ECE multi-classe (top-1) : |confiance moyenne − accuracy| par bin."""
+        tot = [0] * bins
+        conf = [0.0] * bins
+        corr = [0.0] * bins
+        for d, o in zip(dists, outcomes):
+            k_max = max(d, key=d.get)
+            p = float(d[k_max])
+            b = min(bins - 1, int(p * bins))
+            tot[b] += 1
+            conf[b] += p
+            corr[b] += 1.0 if k_max == o else 0.0
+        ece = 0.0
+        n = max(1, len(dists))
+        for b in range(bins):
+            if tot[b]:
+                ece += (tot[b] / n) * abs(conf[b] / tot[b] - corr[b] / tot[b])
+        return round(ece, 5)
+
+    @staticmethod
+    def _bootstrap_ci(diffs, resamples=2000, seed=42):
+        """IC95 bootstrap apparié sur les différences par match (mêmes matchs)."""
+        import random
+        if not diffs:
+            return None
+        rng = random.Random(seed)
+        n = len(diffs)
+        means = []
+        for _ in range(resamples):
+            means.append(sum(diffs[rng.randrange(n)] for _ in range(n)) / n)
+        means.sort()
+        lo = means[int(0.025 * resamples)]
+        hi = means[int(0.975 * resamples)]
+        return [round(lo, 5), round(hi, 5)]
+
     def compare_with_2a(self, limit_per_label=100000):
-        """§15 — READ-ONLY. Jointure shadow OK × 2A (1N2 dernière version ≤
-        kickoff) × results. Brier/LogLoss UNIQUEMENT si N ≥ 30 par label."""
+        """§15/§11 2C.2 — READ-ONLY. Jointure shadow OK × 2A (1N2 dernière
+        version) × results, mêmes matchs et mêmes horizons. Verdicts :
+        N<30 INSUFFICIENT_SAMPLE · 30≤N<100 OBSERVATION_ONLY ·
+        N≥100 COMPARISON_ELIGIBLE (+ bootstrap apparié). Jamais de supériorité
+        annoncée avant N≥100 (et jamais sur l'accuracy seule)."""
         out = {}
-        for label, _, _ in ((l, None, None) for l in ("T-180", "T-60", "T-15")):
+        min_n = int(C["minimum_sample_size"])
+        strong_n = int(C.get("strong_claim_n", 100))
+        for label in ("T-180", "T-60", "T-15"):
             rows = self.db.rows_to_dicts(self.db.query(
                 """SELECT s.match_id, s.calibrated_home ch, s.calibrated_draw cd,
                           s.calibrated_away ca, s.raw_home rh, s.raw_draw rd,
@@ -292,32 +333,61 @@ class ShadowRunner:
                 (MODEL_B, label, limit_per_label)))
             n = len(rows)
             entry = {"n": n}
-            if n < int(C["minimum_sample_size"]):
+            if n < min_n:
                 entry["verdict"] = "INSUFFICIENT_SAMPLE"
-            else:
-                import math
-                b2c = b2a = l2c = l2a = 0.0
-                used = 0
-                for r in rows:
-                    dist_a = self._dist_2a(r["match_id"], r["vs"])
-                    if not dist_a:
-                        continue
-                    oc = "1" if r["hg"] > r["ag"] else ("N" if r["hg"] == r["ag"] else "2")
-                    pc = {"1": r["ch"] or r["rh"], "N": r["cd"] or r["rd"],
-                          "2": r["ca"] or r["ra"]}
-                    b2c += sum((pc[k] - (oc == k)) ** 2 for k in ("1", "N", "2"))
-                    b2a += sum((dist_a[k] - (oc == k)) ** 2 for k in ("1", "N", "2"))
-                    l2c += -math.log(max(pc[oc], 1e-12))
-                    l2a += -math.log(max(dist_a[oc], 1e-12))
-                    used += 1
-                if used < int(C["minimum_sample_size"]):
-                    entry.update({"n": used, "verdict": "INSUFFICIENT_SAMPLE"})
-                else:
-                    entry.update({"n": used, "verdict": "OK",
-                                  "brier_2c": round(b2c / used, 5),
-                                  "brier_2a": round(b2a / used, 5),
-                                  "logloss_2c": round(l2c / used, 5),
-                                  "logloss_2a": round(l2a / used, 5)})
+                out[label] = entry
+                continue
+            import math
+            d_raw, d_cal, d_2a, outs = [], [], [], []
+            for r in rows:
+                dist_a = self._dist_2a(r["match_id"], r["vs"])
+                if not dist_a:
+                    continue
+                oc = "1" if r["hg"] > r["ag"] else ("N" if r["hg"] == r["ag"] else "2")
+                pr = {"1": r["rh"], "N": r["rd"], "2": r["ra"]}
+                pc = {"1": r["ch"] or r["rh"], "N": r["cd"] or r["rd"],
+                      "2": r["ca"] or r["ra"]}
+                d_raw.append(pr)
+                d_cal.append(pc)
+                d_2a.append(dist_a)
+                outs.append(oc)
+            used = len(outs)
+            entry["n_evaluable"] = used
+            entry["coverage"] = round(used / n, 4) if n else 0.0
+            if used < min_n:
+                entry["verdict"] = "INSUFFICIENT_SAMPLE"
+                out[label] = entry
+                continue
+
+            def _brier(ds):
+                return sum(sum((d[k] - (o == k)) ** 2 for k in ("1", "N", "2"))
+                           for d, o in zip(ds, outs)) / used
+
+            def _ll(ds):
+                return sum(-math.log(max(d[o], 1e-12))
+                           for d, o in zip(ds, outs)) / used
+
+            entry.update({
+                "brier_2c_raw": round(_brier(d_raw), 5),
+                "brier_2c_calibrated": round(_brier(d_cal), 5),
+                "brier_2a": round(_brier(d_2a), 5),
+                "logloss_2c_raw": round(_ll(d_raw), 5),
+                "logloss_2c_calibrated": round(_ll(d_cal), 5),
+                "logloss_2a": round(_ll(d_2a), 5),
+                "ece_2c_calibrated": self._ece_top1(d_cal, outs),
+                "ece_2a": self._ece_top1(d_2a, outs),
+                "verdict": ("OBSERVATION_ONLY" if used < strong_n
+                            else "COMPARISON_ELIGIBLE")})
+            if used >= strong_n:
+                # bootstrap apparié (mêmes matchs) — Δ = 2A − 2C_cal (positif ⇒ 2C mieux)
+                diffs_b = [sum((a[k] - (o == k)) ** 2 for k in ("1", "N", "2"))
+                           - sum((c[k] - (o == k)) ** 2 for k in ("1", "N", "2"))
+                           for a, c, o in zip(d_2a, d_cal, outs)]
+                diffs_l = [(-math.log(max(a[o], 1e-12)))
+                           - (-math.log(max(c[o], 1e-12)))
+                           for a, c, o in zip(d_2a, d_cal, outs)]
+                entry["delta_brier_2a_minus_2c_ic95"] = self._bootstrap_ci(diffs_b)
+                entry["delta_logloss_2a_minus_2c_ic95"] = self._bootstrap_ci(diffs_l)
             out[label] = entry
         return out
 
@@ -565,25 +635,38 @@ class ShadowRunner:
             if mc and mc.trained:
                 cd = mc.predict(raw)
                 cal = {k: round(v, 6) for k, v in cd.items()}
-            self._write_prediction(
-                match=match, label=label, t_iso=t_iso, model_id=model_id,
-                raw=raw, cal=cal, feats_hash=feats["feature_hash"], dq=dq,
-                sample_size=sample_size, identity=identity, audit=audit,
-                calibration_version=calibration_version)
-            written += 1
+            try:
+                self._write_prediction(
+                    match=match, label=label, t_iso=t_iso, model_id=model_id,
+                    raw=raw, cal=cal, feats_hash=feats["feature_hash"], dq=dq,
+                    sample_size=sample_size, identity=identity, audit=audit,
+                    calibration_version=calibration_version)
+                written += 1
+            except Exception as we:
+                if "UNIQUE" in str(we).upper():
+                    self._alert("CRITICAL", "SHADOW_DUPLICATE",
+                                {"match_id": match.get("id"),
+                                 "model": model_id, "label": label})
+                    summary["errors"].append({"match_id": match.get("id"),
+                                              "code": "SHADOW_DUPLICATE"})
+                else:
+                    raise
         self._write_features(match["id"], feats, t_iso, None)
         timings["db_ms"] += int((time.monotonic() - td) * 1000)
         summary["predictions"] += written
 
     def _refuse(self, match, label, t_iso, reason, identity, dq, audit,
                 summary, critical=False):
-        """NO_PREDICTION tracée (§23 2C : aucune prédiction > fausse précision)."""
+        """Refus tracé : NO_PREDICTION ou REJECTED_LEAKAGE (§6) — jamais de
+        prédiction plutôt qu'une fausse précision (§23 2C)."""
+        status = ("REJECTED_LEAKAGE" if reason.startswith("REFUSE_PREDICTION:LEAK")
+                  else "NO_PREDICTION")
         self._write_prediction(
             match={**match, "source_match_id": match.get("source_match_id")},
             label=label or "REFUSED", t_iso=t_iso, model_id="MODEL_2C_SHADOW",
             raw=None, cal=None, feats_hash=None, dq=dq, sample_size=0,
             identity=identity or {}, audit=audit,
-            calibration_version="n/a", status="NO_PREDICTION", refusal=reason)
+            calibration_version="n/a", status=status, refusal=reason)
         summary["refusals"][reason.split(":")[0]] = \
             summary["refusals"].get(reason.split(":")[0], 0) + 1
         if critical:
@@ -593,6 +676,13 @@ class ShadowRunner:
     def _finish(self, summary, timings, t0, cycle_id):
         timings["total_ms"] = int((time.monotonic() - t0) * 1000)
         summary["timings"] = timings
+        try:                                            # §10 CPU/mémoire
+            import resource
+            ru = resource.getrusage(resource.RUSAGE_SELF)
+            summary["rusage"] = {"max_rss_mb": round(ru.ru_maxrss / 1024.0, 1),
+                                 "user_cpu_s": round(ru.ru_utime, 3)}
+        except Exception:
+            summary["rusage"] = None
         try:
             self.db.execute(
                 """INSERT INTO model2c_shadow_heartbeats

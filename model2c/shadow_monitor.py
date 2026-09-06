@@ -71,6 +71,8 @@ def status_block(db_module):
                WHERE s.status='OK' AND s.snapshot_label=%s""",
             (label,), one=True)["c"]
         comp[label] = {"n_common": n,
-                       "sample": "OK" if n >= 30 else "INSUFFICIENT_SAMPLE"}
+                       "sample": ("INSUFFICIENT_SAMPLE" if n < 30 else
+                                  "OBSERVATION_ONLY" if n < 100 else
+                                  "COMPARISON_ELIGIBLE")}
     out["comparator"] = comp
     return out
