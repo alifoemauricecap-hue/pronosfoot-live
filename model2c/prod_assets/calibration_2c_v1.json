@@ -1,0 +1,79 @@
+{
+ "calibration_version": "2c-calib-prod-1.0",
+ "method": "platt",
+ "trained_on": "openligadb bl1+bl2 — saisons 2019→2025 (réel)",
+ "models": {
+  "MODEL_2C_B": {
+   "n": 4193,
+   "trained_classes": 3,
+   "classes": {
+    "1": {
+     "a": 0.81626926,
+     "b": -0.26555392,
+     "n": 4193,
+     "trained": true
+    },
+    "N": {
+     "a": 0.80179818,
+     "b": -0.04658951,
+     "n": 4193,
+     "trained": true
+    },
+    "2": {
+     "a": 0.89090622,
+     "b": 0.03961696,
+     "n": 4193,
+     "trained": true
+    }
+   }
+  },
+  "MODEL_2C_C": {
+   "n": 4193,
+   "trained_classes": 3,
+   "classes": {
+    "1": {
+     "a": 0.76103914,
+     "b": -0.05807445,
+     "n": 4193,
+     "trained": true
+    },
+    "N": {
+     "a": 0.88134446,
+     "b": -0.12282755,
+     "n": 4193,
+     "trained": true
+    },
+    "2": {
+     "a": 0.75397053,
+     "b": -0.18105883,
+     "n": 4193,
+     "trained": true
+    }
+   }
+  },
+  "MODEL_2C_D": {
+   "n": 4193,
+   "trained_classes": 3,
+   "classes": {
+    "1": {
+     "a": 0.99382708,
+     "b": -0.13381565,
+     "n": 4193,
+     "trained": true
+    },
+    "N": {
+     "a": 0.9306194,
+     "b": 0.01518127,
+     "n": 4193,
+     "trained": true
+    },
+    "2": {
+     "a": 1.01577403,
+     "b": 0.07938244,
+     "n": 4193,
+     "trained": true
+    }
+   }
+  }
+ }
+}

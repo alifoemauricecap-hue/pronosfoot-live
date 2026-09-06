@@ -78,6 +78,12 @@ ALIASES = {
     "ssv jahn regensburg": "jahn regensburg",
     "dynamo dresden": "dynamo dresden",
     "sg dynamo dresden": "dynamo dresden",
+    # --- formes ESPN RÉELLEMENT OBSERVÉES (backup prod 2026-09-06, 2C.1) ---
+    "fc cologne": "fc koln",                 # ESPN anglicise Köln
+    "hamburg sv": "hamburger sv",            # ESPN vs OL "Hamburger SV"
+    "hertha berlin": "hertha bsc",           # ESPN vs OL "Hertha BSC"
+    "mainz": "mainz 05",                     # ESPN raccourcit
+    "tsv eintracht braunschweig": "braunschweig",
     "1 fc magdeburg": "magdeburg",
     "arminia bielefeld": "arminia bielefeld",
     "dsc arminia bielefeld": "arminia bielefeld",
@@ -89,7 +95,7 @@ ALIASES = {
     "fsv zwickau": None,
     "erzgebirge aue": "erzgebirge aue",
     "fc erzgebirge aue": "erzgebirge aue",
-    "sv elversberg": "elversberg",
+    "sv elversberg": "sv 07 elversberg",  # seed OL = « SV 07 Elversberg » (corrigé 2C.1)
     "ssv ulm 1846": "ulm",
     "preussen munster": "preussen munster",
     "sc preussen munster": "preussen munster",

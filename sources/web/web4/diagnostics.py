@@ -139,6 +139,14 @@ def ingestion_status(registry=None, db_module=None):
             })
         out["alerts"] = [dict(a) for a in _metrics.recent_alerts(
             limit=10, db_module=dbm)]
+        # 2C.1 — diagnostic shadow (compteurs INTERNES §16 — jamais de
+        # probabilités, jamais exposé au frontend ; additif et défensif)
+        try:
+            from model2c import shadow_monitor as _smon
+            out["shadow2c"] = _smon.status_block(dbm)
+        except Exception as e2:
+            out["shadow2c"] = {"enabled": None, "status": "unavailable",
+                               "error": type(e2).__name__}
     except Exception as e:
         out["ok"] = False
         out["error"] = f"{type(e).__name__}: {e}"

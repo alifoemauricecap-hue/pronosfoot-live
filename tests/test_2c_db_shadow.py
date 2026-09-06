@@ -25,7 +25,9 @@ def _pin(name, version="1.0+t"):
 
 class TestMigrationV3:
     def test_version_3_applied(self):
-        assert db.migration_version() == 3
+        # >= 3 : la migration v4 (2C.1, additive) fait passer le max à 4 —
+        # l'intention (v3 bien appliquée) est préservée. Divulgué (2C.1 §0-I1bis).
+        assert db.migration_version() >= 3
 
     def test_v3_tables_exist(self):
         names = {r["name"] for r in db.query(

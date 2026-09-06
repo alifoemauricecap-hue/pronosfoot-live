@@ -1,0 +1,23 @@
+{
+ "generated_at": "2026-09-06T07:51:03.085958+00:00",
+ "dataset_hash": "3c738022adf03431bc04dc3b63e42cc7a1bed34e664f15b39fbe7bd73c5b5057",
+ "code_hash": "fc21021fbc0dda2ef5d66c2bb07535cdbc6cf0c6c70892c49629b294240a33fc",
+ "seed_sha256": "3420c6562411d81b3c318ba0194fa9f8906149cce200fef0a4799719dc5f8310",
+ "calibration_sha256": "cc91e37e0c2c01f247211a10ba69f2bb56ad167cc1748edb433fe64809ffc63a",
+ "seed_matches": 6120,
+ "frozen_hyperparams": {
+  "elo_k": 32,
+  "dc_xi": 0.003,
+  "weight_c": 0.5
+ },
+ "calibration_version": "2c-calib-prod-1.0",
+ "note": "Assets FIGÉS pour le shadow 2C.1. La calibration ne sera JAMAIS ré-entraînée sur la production (§10) : toute nouvelle calibration = nouvelle version, décision humaine.",
+ "identity_coverage_prod": {
+  "checked": 36,
+  "mapped": 35,
+  "unknown": [
+   "Energie Cottbus"
+  ],
+  "note": "Energie Cottbus : absent de l'historique réel 2016-2025 (3. Liga) → NO_PREDICTION honnête jusqu'à historique suffisant"
+ }
+}

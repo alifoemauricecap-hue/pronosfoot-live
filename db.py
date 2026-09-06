@@ -502,10 +502,107 @@ SCHEMA_V3 = [
        BEGIN SELECT RAISE(ABORT, 'FEATURE 2C APPEND-ONLY : suppression interdite'); END""",
 ]
 
+# ---------------------------------------------------------------------------
+# MIGRATION v4 (ÉTAPE 2C.1 — SHADOW PRODUCTION) — 100 % ADDITIVE.
+# Colonnes d'audit/identité/labels ajoutées à predictions_2c_shadow (ALTER
+# ... ADD COLUMN : aucune donnée existante modifiée) + tables 2C dédiées.
+# AUCUNE table 2A (v1/v2) n'est touchée. Écritures 2C.1 UNIQUEMENT dans les
+# tables ci-dessous + celles de la v3 (§2 de la mission 2C.1).
+# ---------------------------------------------------------------------------
+SCHEMA_V4 = [
+    # ---- §6/§8/§9/§13/§14 : colonnes d'audit shadow -------------------------
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN snapshot_label TEXT",
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN refusal_reason TEXT",
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN raw_home REAL",
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN raw_draw REAL",
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN raw_away REAL",
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN calibrated_home REAL",
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN calibrated_draw REAL",
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN calibrated_away REAL",
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN max_feature_effective_at TEXT",
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN max_feature_retrieved_at TEXT",
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN source_match_id TEXT",
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN canonical_match_id TEXT",
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN identity_confidence REAL",
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN identity_method TEXT",
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN data_level TEXT",
+    "ALTER TABLE predictions_2c_shadow ADD COLUMN feature_version TEXT",
+    # ---- §13 : une prédiction par (match, modèle, label) — jamais remplacée
+    """CREATE UNIQUE INDEX idx_p2cs_label_dedup
+       ON predictions_2c_shadow(match_id, model_id, model_version, snapshot_label)
+       WHERE status='OK'""",
+    "CREATE INDEX idx_p2cs_created ON predictions_2c_shadow(created_at)",
+    # ---- §17 : alertes shadow ISOLÉES (table 2C — web_alerts WEB-4 jamais
+    #      écrite par 2C, §2 strict)
+    """CREATE TABLE model2c_shadow_alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        level TEXT NOT NULL,
+        code TEXT NOT NULL,
+        detail_json TEXT,
+        at_utc TEXT NOT NULL
+    )""",
+    "CREATE INDEX idx_m2sa_at ON model2c_shadow_alerts(at_utc)",
+    # ---- §12/§18 : heartbeat par exécution shadow (append-only ; le dernier
+    #      état = dernière ligne — aucune mutation)
+    """CREATE TABLE model2c_shadow_heartbeats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cycle_id TEXT,
+        at_utc TEXT NOT NULL,
+        duration_ms INTEGER,
+        timings_json TEXT,
+        summary_json TEXT NOT NULL
+    )""",
+    "CREATE INDEX idx_m2sh_at ON model2c_shadow_heartbeats(at_utc)",
+    # ---- D3-3 : résultats prod (2A, lecture seule) déjà intégrés à l'état 2C
+    #      (append-only, dédup par match_id — un résultat n'est jamais rejoint deux fois)
+    """CREATE TABLE model2c_team_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        match_id TEXT NOT NULL UNIQUE,
+        league TEXT NOT NULL,
+        kickoff_utc TEXT NOT NULL,
+        home TEXT NOT NULL,
+        away TEXT NOT NULL,
+        hg INTEGER NOT NULL,
+        ag INTEGER NOT NULL,
+        captured_at TEXT,
+        processed_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX idx_m2te_kickoff ON model2c_team_events(kickoff_utc)",
+    # ---- D3-4 : params Dixon-Coles refit quotidien (cache append-only)
+    """CREATE TABLE model2c_dc_params (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        league TEXT NOT NULL,
+        fit_day TEXT NOT NULL,
+        params_json TEXT NOT NULL,
+        n_train INTEGER,
+        dataset_hash TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE (league, fit_day)
+    )""",
+    # ---- immuabilité (append-only §3) ---------------------------------------
+    """CREATE TRIGGER trg_m2sa_no_update BEFORE UPDATE ON model2c_shadow_alerts
+       BEGIN SELECT RAISE(ABORT, '2C.1 APPEND-ONLY : modification interdite'); END""",
+    """CREATE TRIGGER trg_m2sa_no_delete BEFORE DELETE ON model2c_shadow_alerts
+       BEGIN SELECT RAISE(ABORT, '2C.1 APPEND-ONLY : suppression interdite'); END""",
+    """CREATE TRIGGER trg_m2sh_no_update BEFORE UPDATE ON model2c_shadow_heartbeats
+       BEGIN SELECT RAISE(ABORT, '2C.1 APPEND-ONLY : modification interdite'); END""",
+    """CREATE TRIGGER trg_m2sh_no_delete BEFORE DELETE ON model2c_shadow_heartbeats
+       BEGIN SELECT RAISE(ABORT, '2C.1 APPEND-ONLY : suppression interdite'); END""",
+    """CREATE TRIGGER trg_m2te_no_update BEFORE UPDATE ON model2c_team_events
+       BEGIN SELECT RAISE(ABORT, '2C.1 APPEND-ONLY : modification interdite'); END""",
+    """CREATE TRIGGER trg_m2te_no_delete BEFORE DELETE ON model2c_team_events
+       BEGIN SELECT RAISE(ABORT, '2C.1 APPEND-ONLY : suppression interdite'); END""",
+    """CREATE TRIGGER trg_m2dc_no_update BEFORE UPDATE ON model2c_dc_params
+       BEGIN SELECT RAISE(ABORT, '2C.1 APPEND-ONLY : modification interdite'); END""",
+    """CREATE TRIGGER trg_m2dc_no_delete BEFORE DELETE ON model2c_dc_params
+       BEGIN SELECT RAISE(ABORT, '2C.1 APPEND-ONLY : suppression interdite'); END""",
+]
+
 MIGRATIONS = [
     (1, "schema initial : persistance + predictions gelees + anti-fuite", SCHEMA_V1),
     (2, "web4 : ingestion persistante (cache+PIT+journal+cycles+entites)", SCHEMA_V2),
     (3, "2c experimental : shadow + registry + features (additif)", SCHEMA_V3),
+    (4, "2c.1 shadow production : audit/identite/labels + tables dediees (additif)", SCHEMA_V4),
 ]
 
 

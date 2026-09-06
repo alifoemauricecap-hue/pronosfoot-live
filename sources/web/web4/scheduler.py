@@ -255,6 +255,16 @@ class IngestionScheduler:
         summary["cache_hits"] = hits
         summary["status"] = status
         summary["alerts"] = [a["code"] for a in alerts]
+        # 2C.1 — SHADOW EXPERIMENTAL (additif, OFF par défaut — jamais bloquant
+        # §4/§17 : gate env + isolation totale dans shadow_hook ; quand OFF ou
+        # sans résultat, le summary est STRICTEMENT inchangé — non-régression)
+        try:
+            from model2c import shadow_hook as _shadow2c
+            _shadow_res = _shadow2c.after_ingestion_cycle(self, summary, now)
+            if _shadow_res is not None:
+                summary["shadow2c"] = _shadow_res
+        except Exception:
+            pass
         return summary
 
     def _matches_for_tier(self, tier, now):
